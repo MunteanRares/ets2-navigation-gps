@@ -13,13 +13,15 @@ Download the `Tiles.zip` archive from this link:
 2. Verify that the extracted folder contains numbered subfolders (`0`, `1`, `2`, …) representing zoom levels.
 3. **Move the folder** into your Nuxt project’s `public/` directory.
 4. The final folder structure should look like this:
-   euro-truck-nav/
-        └─ public/
-            └─ Tiles/
-                ├─ 0/
-                ├─ 1/
-                └─ ...
-
+<pre>
+euro-truck-nav/
+    └── public/
+        └── Tiles/
+            ├── 0/
+            ├── 1/
+            ├── 2/
+            └── ...
+</pre>
 5. Start your Nuxt app. Leaflet will load tiles from `/Tiles/{z}/{x}/{y}.png`.
 
 ---
