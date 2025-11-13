@@ -1,23 +1,35 @@
 <script lang="ts" setup>
 import type { GeojsonData } from "~~/shared/types/GeoJsonTypes/GeojsonData";
 
-let startMarker: L.Marker | null = null;
-let endMarker: L.Marker | null = null;
-let startKey: string | null = null;
-let endKey: string | null = null;
-let currentRoute: L.Polyline | null = null;
+const { map, initMap } = useMap();
+
+let markers: L.Marker[] = [];
+let routes: L.Polyline[] = [];
+
+const resetMarkers = (map: L.Map) => {
+    markers.forEach((marker) => map.removeLayer(marker));
+    routes.forEach((route) => map.removeLayer(route));
+
+    markers = [];
+    routes = [];
+};
+
+const clearMap = () => {
+    if (map.value) resetMarkers(map.value);
+};
 
 onMounted(async () => {
     const L = (await import("leaflet")).default;
-    const { map, initMap } = useMap();
 
-    initMap("map");
+    await initMap("map");
 
     const res = await fetch("/roadnetwork.geojson");
     const data: GeojsonData = await res.json();
+
     const graph = new Graph();
     graph.buildGraph(data);
     if (!map.value) return;
+
     map.value.on("click", (e: L.LeafletMouseEvent) => {
         const clickedKey: string | null = graph.snapToGraph(
             e.latlng.lat,
@@ -27,38 +39,73 @@ onMounted(async () => {
 
         const node = graph.getNode(clickedKey);
         if (!node) return;
-        if (!startMarker) {
-            startMarker = L.marker([node.lat, node.lng]).addTo(map.value!);
-            startKey = clickedKey;
-        } else if (!endMarker) {
-            endMarker = L.marker([node.lat, node.lng]).addTo(map.value!);
-            endKey = clickedKey;
-        } else {
-            if (currentRoute) map.value?.removeLayer(currentRoute);
-            map.value?.removeLayer(startMarker);
-            map.value?.removeLayer(endMarker);
-            startMarker = null;
-            endMarker = null;
-            startKey = null;
-            endKey = null;
-            currentRoute = null;
-        }
-        if (startKey && endKey) {
-            const routeCoords: [number, number][] = graph.dijkstra(
-                startKey,
-                endKey
+
+        const marker = L.marker([node.lat, node.lng]).addTo(map.value!);
+        markers.push(marker);
+
+        marker.on("click", () => {
+            map.value!.removeLayer(marker);
+            const index = markers.indexOf(marker);
+            markers.splice(index, 1);
+
+            routes.forEach((r) => map.value!.removeLayer(r));
+            routes.length = 0;
+
+            for (let i = 1; i < markers.length; i++) {
+                const prev = markers[i - 1];
+                const curr = markers[i];
+                const prevKey = graph.snapToGraph(
+                    prev!.getLatLng().lat,
+                    prev!.getLatLng().lng
+                );
+                const currKey = graph.snapToGraph(
+                    curr!.getLatLng().lat,
+                    curr!.getLatLng().lng
+                );
+                if (prevKey && currKey) {
+                    const coords = graph.dijkstra(prevKey, currKey);
+                    const polyline = L.polyline(coords, {
+                        color: "cyan",
+                        weight: 3,
+                    }).addTo(map.value!);
+                    routes.push(polyline);
+                }
+            }
+        });
+
+        if (markers?.length && markers.length > 1) {
+            const lastKey = graph.snapToGraph(
+                markers[markers.length - 2]!.getLatLng().lat,
+                markers[markers.length - 2]!.getLatLng().lng
             );
-            currentRoute = L.polyline(routeCoords, {
-                color: "cyan",
-                weight: 3,
-            }).addTo(map.value!);
+            if (lastKey) {
+                const routeCoords: [number, number][] = graph.dijkstra(
+                    lastKey,
+                    clickedKey
+                );
+                const polyline = L.polyline(routeCoords, {
+                    color: "cyan",
+                    weight: 3,
+                }).addTo(map.value!);
+                routes!.push(polyline);
+            }
         }
     });
 });
 </script>
 
 <template>
-    <div id="map"></div>
+    <div id="map-wrapper">
+        <div id="map"></div>
+        <div id="button-wrapper">
+            <input
+                type="button"
+                value="Clear Markers"
+                class="bottom-btn btn"
+                @click.stop="clearMap"
+            />
+        </div>
+    </div>
 </template>
 
 <style scoped lang="scss">

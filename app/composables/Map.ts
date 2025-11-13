@@ -13,6 +13,7 @@ export const useMap = () => {
             maxZoom: Variables.TILESET_MAX_ZOOM,
             zoomSnap: 0.5,
             zoomDelta: 0.5,
+            zoomAnimation: false,
         });
 
         const southWest = map.value.unproject(

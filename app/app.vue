@@ -19,3 +19,7 @@ useHead({
 <template>
     <NuxtPage />
 </template>
+
+<style lang="scss">
+@use "~/assets/scss/global/global";
+</style>
