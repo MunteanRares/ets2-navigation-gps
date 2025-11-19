@@ -20,8 +20,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import RBush from "rbush";
 import * as turf from "@turf/turf";
 import path from "path";
-
-type Coord = [number, number];
+import type { Node, Edge, Coord } from "../../shared/types/geojson/geojson";
+import { haversine } from "../assets/utils/helpers.ts";
 
 interface InputFeature {
     type: "Feature";
@@ -37,40 +37,12 @@ interface InputGeoJSON {
     features: InputFeature[];
 }
 
-interface Node {
-    id: number;
-    lng: number;
-    lat: number;
-}
-
-interface Edge {
-    from: number;
-    to: number;
-    weight: number;
-    featureId?: string | null;
-    properties?: Record<string, any>;
-}
-
 interface BBoxItem {
     minX: number;
     minY: number;
     maxX: number;
     maxY: number;
     idx: number;
-}
-
-function haversine(a: Coord, b: Coord): number {
-    const R = 6371000;
-    const toRad = (d: number) => (d * Math.PI) / 180;
-    const dLat = toRad(b[1] - a[1]);
-    const dLon = toRad(b[0] - a[0]);
-    const lat1 = toRad(a[1]);
-    const lat2 = toRad(b[1]);
-
-    const sin1 = Math.sin(dLat / 2);
-    const sin2 = Math.sin(dLon / 2);
-    const h = sin1 * sin1 + Math.cos(lat1) * Math.cos(lat2) * sin2 * sin2;
-    return 2 * R * Math.asin(Math.sqrt(h));
 }
 
 const COORD_MAX_DECIMALS = 6;
@@ -117,22 +89,11 @@ function storeFeaturePoints(features: InputFeature[]) {
     for (let i = 0; i < features.length; i++)
         splitPointsToMap.set(i, new Set());
 
-    console.log(features[6]?.properties.roadType);
     for (let i = 0; i < features.length; i++) {
         const coords = features[i]?.geometry.coordinates;
         if (coords?.length) {
-            // const first = coords[0];
-            // const last = coords[coords.length - 1];
-            // const middle = coords[Math.floor(coords.length / 2)];
-            // if (first && last) {
-            //     splitPointsToMap.get(i)?.add(coordKey(first));
-            //     splitPointsToMap.get(i)?.add(coordKey(last));
-            //     if (middle) {
-            //         splitPointsToMap.get(i)?.add(coordKey(middle));
-            //     }
-            // }
             for (let j = 0; j < coords.length; j++) {
-                if (j % 5 == 0) {
+                if (j % 2 != 0) {
                     splitPointsToMap.get(i)?.add(coordKey(coords[j]!));
                 }
             }
@@ -140,6 +101,147 @@ function storeFeaturePoints(features: InputFeature[]) {
     }
 
     return splitPointsToMap;
+}
+
+function snapEndpoints(
+    features: InputFeature[],
+    toleranceMeters: number = 1.0
+): InputFeature[] {
+    console.log(
+        `Snapping endpoints with ${toleranceMeters}m tolerance (rbush)...`
+    );
+
+    // quick meters -> degrees approx (latitude). Good enough for small tolerances.
+    const metersToDeg = (m: number) => m / 111320;
+    const degThreshold = metersToDeg(toleranceMeters);
+
+    type EPItem = {
+        minX: number;
+        minY: number;
+        maxX: number;
+        maxY: number;
+        id: number; // unique endpoint id
+        featureIdx: number;
+        isStart: boolean;
+        coord: Coord;
+    };
+
+    const tree = new RBush<EPItem>();
+
+    // build endpoint list + RBush index
+    const endpoints: EPItem[] = [];
+    let eid = 0;
+    for (let i = 0; i < features.length; i++) {
+        const coords = features[i]!.geometry.coordinates;
+        if (!coords || coords.length < 2) continue;
+
+        const first: Coord = coords[0]!;
+        const last: Coord = coords[coords.length - 1]!;
+
+        const e1: EPItem = {
+            minX: first[0],
+            minY: first[1],
+            maxX: first[0],
+            maxY: first[1],
+            id: eid++,
+            featureIdx: i,
+            isStart: true,
+            coord: first,
+        };
+        const e2: EPItem = {
+            minX: last[0],
+            minY: last[1],
+            maxX: last[0],
+            maxY: last[1],
+            id: eid++,
+            featureIdx: i,
+            isStart: false,
+            coord: last,
+        };
+
+        endpoints.push(e1, e2);
+        tree.insert(e1);
+        tree.insert(e2);
+    }
+
+    console.log(`Indexed ${endpoints.length} endpoints in rbush`);
+
+    const visited = new Set<number>();
+    const snappingMap = new Map<string, Coord>();
+
+    // For each endpoint, query nearby endpoints and cluster by distance
+    for (let i = 0; i < endpoints.length; i++) {
+        const ep = endpoints[i]!;
+        if (visited.has(ep.id)) continue;
+
+        // Query square bbox expanded by degThreshold
+        const qBox = {
+            minX: ep.coord[0] - degThreshold,
+            minY: ep.coord[1] - degThreshold,
+            maxX: ep.coord[0] + degThreshold,
+            maxY: ep.coord[1] + degThreshold,
+        };
+
+        const candidates = tree.search(qBox) as EPItem[];
+
+        const cluster: EPItem[] = [];
+        for (const c of candidates) {
+            if (visited.has(c.id)) continue;
+            const d = haversine(ep.coord, c.coord);
+            if (d <= toleranceMeters) {
+                cluster.push(c);
+                visited.add(c.id);
+            }
+        }
+
+        if (cluster.length > 1) {
+            // compute centroid (simple average)
+            let sumLng = 0;
+            let sumLat = 0;
+            for (const m of cluster) {
+                sumLng += m.coord[0];
+                sumLat += m.coord[1];
+            }
+            const centroid: Coord = [
+                sumLng / cluster.length,
+                sumLat / cluster.length,
+            ];
+
+            // normalize centroid decimals to keep consistent coordKey behavior
+            const snapped: Coord = [
+                Number(centroid[0].toFixed(COORD_MAX_DECIMALS)),
+                Number(centroid[1].toFixed(COORD_MAX_DECIMALS)),
+            ];
+
+            for (const mem of cluster) {
+                snappingMap.set(coordKey(mem.coord), snapped);
+            }
+        }
+    }
+
+    console.log(
+        `Created ${snappingMap.size} snapping mappings (endpoint clusters)`
+    );
+
+    // Apply snapping: only points that are in snappingMap will be changed (so non-endpoint vertices unaffected)
+    const out = features.map((feature) => {
+        const coords = feature.geometry.coordinates;
+        const newCoords = coords.map((coord) => {
+            const key = coordKey(coord);
+            const mapped = snappingMap.get(key);
+            return mapped ? mapped : coord;
+        });
+
+        return {
+            ...feature,
+            geometry: {
+                ...feature.geometry,
+                coordinates: newCoords,
+            },
+        };
+    });
+
+    return out;
 }
 
 //// Get the bboxes that intersect with the current bbox, then check from that smaller area if they actually intersect.
@@ -213,7 +315,7 @@ function createLinePointsArray(
 ) {
     let line = turf.lineString(feature?.geometry.coordinates);
     line = turf.simplify(line, {
-        tolerance: 0.001,
+        tolerance: 0.0001,
         highQuality: true,
     });
 
@@ -416,14 +518,86 @@ function saveFilesToDisk(
     );
 }
 
+function saveGraphAsGeoJSON(outDir: string, nodes: Node[], edges: Edge[]) {
+    const features: any[] = [];
+
+    // Add nodes as points
+    for (const node of nodes) {
+        features.push({
+            type: "Feature",
+            geometry: {
+                type: "Point",
+                coordinates: [node.lng, node.lat],
+            },
+            properties: {
+                id: node.id,
+                type: "node",
+            },
+        });
+    }
+
+    // Add edges as lines
+    for (const edge of edges) {
+        const fromNode = nodes[edge.from];
+        const toNode = nodes[edge.to];
+
+        features.push({
+            type: "Feature",
+            geometry: {
+                type: "LineString",
+                coordinates: [
+                    [fromNode!.lng, fromNode!.lat],
+                    [toNode!.lng, toNode!.lat],
+                ],
+            },
+            properties: {
+                featureId: edge.featureId,
+                weight: edge.weight,
+                roadType: edge.properties?.roadType ?? null,
+                type: "edge",
+            },
+        });
+    }
+
+    const geojson = {
+        type: "FeatureCollection",
+        features,
+    };
+
+    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    writeFileSync(
+        path.join(outDir, "graph_combined.geojson"),
+        JSON.stringify(geojson, null, 2)
+    );
+
+    console.log("Combined GeoJSON saved:", features.length, "features");
+}
+
 //// BUILD GRAPH
 function buildGraph(inputDir: string, outDir: string) {
     let splitPointsToMap: Map<number, Set<string>>;
 
     console.log("Loading GeoJSON: ", inputDir);
     const geo = readGeojson(inputDir);
-    const features = geo.features;
+    let features = geo.features;
 
+    const freewayFeatures = features.filter(
+        (f) => f.properties.roadType === "freeway"
+    );
+
+    const dividedFeatures = features.filter(
+        (f) => f.properties.roadType === "divided"
+    );
+
+    const localFeatures = features.filter(
+        (f) => f.properties.roadType === "local"
+    );
+
+    const snappedFeatures = snapEndpoints(freewayFeatures, 0.0001);
+    const snappedDivided = snapEndpoints(dividedFeatures, 0.0001);
+    const snappedLocal = snapEndpoints(localFeatures, 0.00001);
+
+    features = [...snappedDivided, ...snappedFeatures, ...snappedLocal];
     console.log("Building RBush tree bounding box for features...");
     const { tree, bboxes } = createBbox(features);
 
@@ -438,6 +612,7 @@ function buildGraph(inputDir: string, outDir: string) {
 
     console.log("Collected intersection points. Now building nodes & edges...");
     const { nodes, edges } = createNodesAndEdges(features, splitPointsToMap);
+    saveGraphAsGeoJSON(outDir, nodes, edges);
 
     saveFilesToDisk(outDir, nodes, edges, features);
     console.log("Graph saved to:", outDir);
