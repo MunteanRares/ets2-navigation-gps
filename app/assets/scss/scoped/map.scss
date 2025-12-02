@@ -1,7 +1,8 @@
 @use "~/assets/scss/global/variables" as *;
-#mapEl {
+.map-container {
     width: 100vw;
     height: 100vh;
+    background-color: #272d39;
 }
 
 // .bottom-btn {

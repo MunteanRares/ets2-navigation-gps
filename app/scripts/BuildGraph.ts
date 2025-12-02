@@ -26,7 +26,7 @@ import {
 import RBush from "rbush";
 import * as turf from "@turf/turf";
 import path from "path";
-import type { Node, Edge, Coord } from "../../shared/types/geojson/geojson";
+import type { Node, Edge, Coord } from "../../shared/types";
 import { haversine } from "../assets/utils/helpers.ts";
 
 interface InputFeature {
@@ -396,7 +396,6 @@ function cleanUpPoints(pointsWithDistance: { coord: Coord; locKm: number }[]) {
 }
 
 //// PROCESS POINTS AND LINES AND CREATE NODES AND EDGES
-
 function toRad(deg: number) {
     return (deg * Math.PI) / 180;
 }

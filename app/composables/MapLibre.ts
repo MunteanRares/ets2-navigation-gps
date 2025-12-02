@@ -1,7 +1,4 @@
 import type { Map as MapLibreGl, StyleSpecification } from "maplibre-gl";
-import { haversine } from "~/assets/utils/helpers";
-import type { Node, Edge, Coord } from "~~/shared/types/geojson/geojson";
-import { loadGraph } from "~/assets/utils/clientGraph";
 
 export async function initializeMap(
     container: HTMLElement
@@ -12,7 +9,7 @@ export async function initializeMap(
     const protocol = new Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
 
-    const PMTILES_URL = "/ets2.pmtiles";
+    const PMTILES_URL = "/map-data/tiles/ets2.pmtiles";
     const pmtiles = new PMTiles(PMTILES_URL);
     protocol.add(pmtiles);
 
@@ -57,12 +54,38 @@ export async function initializeMap(
     });
 
     map.on("load", async () => {
+        ////
+        //// ADDING SOURCES
+        //// TO LATER DISPLAY THEM
+        ////
         // ADDING WATER BORDERS
         map.addSource("ets2-water", {
             type: "geojson",
-            data: "geojson/ets2-water.geojson",
+            data: "map-data/ets2-water.geojson",
         });
 
+        // FOOTPRINTS (BUILDINGS SHAPE)
+        map.addSource("ets2-footprints", {
+            type: "vector",
+            url: "pmtiles://map-data/tiles/ets2-footprints.pmtiles",
+        });
+
+        // VILLAGE LABELS
+        map.addSource("ets2-villages", {
+            type: "geojson",
+            data: "map-data/ets2-villages.geojson",
+        });
+
+        // COUNTRY DELIMITATION
+        map.addSource("country-borders", {
+            type: "geojson",
+            data: "map-data/ets2-countries.geojson",
+        });
+
+        ////
+        //// LAYERS FOR DISPLAYING
+        //// FROM SOURCES
+        ////
         // OUTLINE
         map.addLayer({
             id: "ets2-water-outline",
@@ -176,12 +199,7 @@ export async function initializeMap(
             "ets2-lines"
         );
 
-        // FOOTPRINTS (BUILDINGS AND STUFF)
-        map.addSource("ets2-footprints", {
-            type: "vector",
-            url: "pmtiles://ets2-footprints.pmtiles",
-        });
-
+        // DISPLAYING BUILDINGS
         map.addLayer({
             id: "footprints-fill",
             type: "fill",
@@ -193,12 +211,7 @@ export async function initializeMap(
             },
         });
 
-        // VILLAGE LABELS
-        map.addSource("ets2-villages", {
-            type: "geojson",
-            data: "/geojson/ets2-villages.geojson",
-        });
-
+        // DISPLAYING VILLAGE NAMES
         map.addLayer({
             id: "village-labels",
             type: "symbol",
@@ -216,7 +229,7 @@ export async function initializeMap(
             minzoom: 7,
         });
 
-        // CITY LABELS
+        // DISPLAYING CITY NAMES
         map.addLayer({
             id: "city-labels",
             type: "symbol",
@@ -235,7 +248,7 @@ export async function initializeMap(
             minzoom: 6,
         });
 
-        // CAPITAL POINTS
+        // DISPLAYING CAPITAL NAMES
         map.addLayer({
             id: "capital-major-labels",
             type: "symbol",
@@ -254,12 +267,7 @@ export async function initializeMap(
             minzoom: 4,
         });
 
-        // COUNTRY DELIMITATION
-        map.addSource("country-borders", {
-            type: "geojson",
-            data: "geojson/ets2-countries.geojson",
-        });
-
+        // DISPLAYING COUNTRY DELIMITATIONS
         map.addLayer({
             id: "country-borders",
             type: "line",
@@ -271,21 +279,6 @@ export async function initializeMap(
                 "line-opacity": 0.4,
             },
         });
-
-        // map.addSource("route", {
-        //     type: "geojson",
-        //     data: { type: "FeatureCollection", features: [] },
-        // });
-
-        // map.addLayer({
-        //     id: "route-layer",
-        //     type: "line",
-        //     source: "route",
-        //     paint: {
-        //         "line-color": "blue",
-        //         "line-width": 10,
-        //     },
-        // });
 
         map.addControl(new maplibregl.NavigationControl());
         map.addControl(new maplibregl.FullscreenControl());

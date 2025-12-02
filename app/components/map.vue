@@ -6,6 +6,7 @@ import { haversine } from "~/assets/utils/helpers";
 import { loadGraph } from "~/assets/utils/clientGraph";
 import RBush from "rbush";
 
+//// INTERFACE FOR RBUSH
 interface NodeIndexItem {
     minX: number;
     minY: number;
@@ -25,6 +26,8 @@ const startNodeId = ref<number | null>(null);
 const endNodeId = ref<number | null>(null);
 const startMarker = ref<maplibregl.Marker | null>(null);
 const endMarker = ref<maplibregl.Marker | null>(null);
+
+//// We use this to find noted in a specific area
 const nodeTree = new RBush<NodeIndexItem>();
 
 //// GRAPH DATA
@@ -39,12 +42,8 @@ onMounted(async () => {
 
     try {
         map.value = await initializeMap(mapEl.value);
-
         if (!map.value) return;
-
         map.value.on("load", visualizeGraph);
-
-        // Listen for clicks to route
         map.value.on("click", handleMapClick);
     } catch (e) {
         console.error(e);
@@ -58,18 +57,18 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
     const clickedCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
     console.log(clickedCoords);
 
-    const nodeId = findClosestNode(clickedCoords);
+    const candidates = getClosestNodes(clickedCoords, 5);
 
-    if (nodeId === null) {
+    if (candidates.length === null) {
         console.warn("No nodes found.");
         return;
     }
 
-    const nodeLoc = nodeCoords.get(nodeId);
-    if (!nodeLoc) return;
-
     if (startNodeId.value === null) {
+        const nodeId = candidates[0]!;
         startNodeId.value = nodeId;
+
+        const nodeLoc = nodeCoords.get(nodeId);
 
         if (startMarker.value) startMarker.value.remove();
         if (endMarker.value) endMarker.value.remove();
@@ -80,40 +79,30 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
             .setLngLat(nodeLoc as [number, number])
             .addTo(map.value!);
     } else {
-        endNodeId.value = nodeId;
+        const candidateSet = new Set(candidates);
 
         if (endMarker.value) endMarker.value.remove();
-        endMarker.value = new maplibregl.Marker({ color: "#FF0000" })
-            .setLngLat(nodeLoc as [number, number])
-            .addTo(map.value!);
 
-        const path = calculateRoute(startNodeId.value, endNodeId.value);
+        const result = calculateRoute(startNodeId.value, candidateSet);
 
-        if (path) {
-            drawRoute(path);
+        if (result) {
+            endNodeId.value = result.endId; // This is the snapped ID
+            const endLoc = nodeCoords.get(result.endId);
+
+            endMarker.value = new maplibregl.Marker({ color: "#FF0000" })
+                .setLngLat(endLoc as [number, number])
+                .addTo(map.value!);
+
+            drawRoute(result.path);
+
             startNodeId.value = null;
+        } else {
+            console.warn("Could not find a path to any nearby node");
         }
     }
 }
 
-function buildNodeIndex(nodes: { id: number; lng: number; lat: number }[]) {
-    const items: NodeIndexItem[] = nodes.map((n) => ({
-        minX: n.lng,
-        minY: n.lat,
-        maxX: n.lng,
-        maxY: n.lat,
-        id: n.id,
-        coord: [n.lng, n.lat],
-    }));
-
-    nodeTree.load(items);
-}
-
-//// FIND NEAREST NODE ON CLICK
-function findClosestNode(target: [number, number]): number | null {
-    let closestId: number | null = null;
-    let minDist = Infinity;
-
+function getClosestNodes(target: [number, number], limit = 5): number[] {
     const radius = 0.5;
 
     const candidates = nodeTree.search({
@@ -123,17 +112,17 @@ function findClosestNode(target: [number, number]): number | null {
         maxY: target[1] + radius,
     });
 
-    for (const item of candidates) {
-        const dist = haversine(target, item.coord);
-        if (dist < minDist) {
-            minDist = dist;
-            closestId = item.id;
-        }
-    }
+    const sorted = candidates
+        .map((item) => ({
+            id: item.id,
+            dist: haversine(target, item.coord),
+        }))
+        .sort((a, b) => a.dist - b.dist); // Closest first
 
-    return closestId;
+    return sorted.slice(0, limit).map((c) => c.id);
 }
 
+//// CALCULATIONS FOR DIJKSTRA ALGORITHM
 function toRad(deg: number) {
     return (deg * Math.PI) / 180;
 }
@@ -169,13 +158,18 @@ function getSignedAngle(
 }
 
 //// DIJKSTRA ALGORITHM + COST
-function calculateRoute(start: number, end: number): [number, number][] | null {
+function calculateRoute(
+    start: number,
+    possibleEnds: Set<number>
+): { path: [number, number][]; endId: number } | null {
     const costs = new Map<number, number>();
     const previous = new Map<number, number>();
     const pq = new Set<number>();
 
     costs.set(start, 0);
     pq.add(start);
+
+    let foundEndId: number | null = null;
 
     while (pq.size > 0) {
         let currentId: number | null = null;
@@ -190,7 +184,10 @@ function calculateRoute(start: number, end: number): [number, number][] | null {
         }
 
         if (currentId === null) break;
-        if (currentId === end) break;
+        if (possibleEnds.has(currentId)) {
+            foundEndId = currentId;
+            break;
+        }
 
         pq.delete(currentId);
 
@@ -255,17 +252,23 @@ function calculateRoute(start: number, end: number): [number, number][] | null {
         }
     }
 
-    if (!previous.has(end) && start !== end) return null;
+    if (
+        foundEndId === null ||
+        (!previous.has(foundEndId) && start !== foundEndId)
+    )
+        return null;
 
     const path: [number, number][] = [];
-    let curr: number | undefined = end;
+
+    let curr: number | undefined = foundEndId;
+
     while (curr !== undefined) {
         const coord = nodeCoords.get(curr);
         if (coord) path.unshift(coord);
         curr = previous.get(curr);
     }
 
-    return path;
+    return { path, endId: foundEndId };
 }
 
 //// DRAWING THE ROUTE
@@ -303,12 +306,27 @@ function clearRouteLayer() {
     }
 }
 
-//// GRAPH DRAWING
+//// NODE INDEX FOR BBOX RBUSH TREE (fasteer search)
+function buildNodeIndex(nodes: { id: number; lng: number; lat: number }[]) {
+    const items: NodeIndexItem[] = nodes.map((n) => ({
+        minX: n.lng,
+        minY: n.lat,
+        maxX: n.lng,
+        maxY: n.lat,
+        id: n.id,
+        coord: [n.lng, n.lat],
+    }));
+
+    nodeTree.load(items);
+}
+
+//// LOADING GRAPH (or visualizing)
 async function visualizeGraph() {
     if (!map.value) return;
     loading.value = true;
 
     try {
+        //// BUILD NODES
         const { nodes, edges } = await loadGraph();
         adjacency.clear();
         nodeCoords.clear();
@@ -332,27 +350,26 @@ async function visualizeGraph() {
             }
         }
 
-        //// CREATING BBOX FOR NODES (FASTER SEARCH)
+        //// CREATING BBOX FOR NODES (FASTER SEARCH) : nodeTree<RBush>
         buildNodeIndex(uniqueNodes);
 
         //// BUILD EDGES
-        const edgeFeatures: any[] = [];
         let connectedCount = 0;
 
         for (const edge of edges) {
-            const u = idRedirect.get(edge.from);
-            const v = idRedirect.get(edge.to);
+            const from = idRedirect.get(edge.from);
+            const to = idRedirect.get(edge.to);
 
-            if (u === undefined || v === undefined || u === v) continue;
+            if (from === undefined || to === undefined || from === to) continue;
 
-            const start = nodeCoords.get(u);
-            const end = nodeCoords.get(v);
+            const start = nodeCoords.get(from);
+            const end = nodeCoords.get(to);
 
             if (start && end) {
                 const rType = edge.properties?.roadType || "local";
                 adjacency
-                    .get(u)
-                    ?.push({ to: v, weight: edge.weight, roadType: rType });
+                    .get(from)
+                    ?.push({ to: to, weight: edge.weight, roadType: rType });
                 connectedCount++;
 
                 //// UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
@@ -437,19 +454,9 @@ async function visualizeGraph() {
 
 <template>
     <div ref="mapEl" class="map-container"></div>
-    <div class="legend">
-        <div class="item"><span class="color road"></span> Road Graph</div>
-        <div class="item">
-            <span class="color snap"></span> Auto-Stitch (Gap Fix)
-        </div>
-        <div class="item"><span class="color route"></span> Route</div>
-    </div>
+    <!-- <div v-else>LODING</div> -->
 </template>
 
-<style scoped>
-.map-container {
-    width: 100%;
-    height: 100vh;
-    background-color: #272d39;
-}
+<style scoped lang="scss">
+@use "/assets/scss/scoped/map.scss";
 </style>
