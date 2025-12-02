@@ -16,7 +16,7 @@
         }
     ],
     "compilerOptions": {
-        "moduleResolution": "node",
+        "moduleResolution": "bundler",
         "module": "esnext",
         "target": "es2022",
         "lib": ["esnext"],
