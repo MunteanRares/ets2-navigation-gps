@@ -103,7 +103,7 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
 }
 
 function getClosestNodes(target: [number, number], limit = 5): number[] {
-    const radius = 0.5;
+    const radius = 0.3;
 
     const candidates = nodeTree.search({
         minX: target[0] - radius,
@@ -220,7 +220,7 @@ function calculateRoute(
                 }
 
                 //// 2. GLOBAL SAFETY
-                if (absAngle > 100) {
+                if (absAngle > 110) {
                     stepCost += 1000.0;
                 }
 
@@ -355,7 +355,7 @@ async function visualizeGraph() {
 
         //// BUILD EDGES
         let connectedCount = 0;
-
+        const edgeFeatures: any[] = [];
         for (const edge of edges) {
             const from = idRedirect.get(edge.from);
             const to = idRedirect.get(edge.to);
@@ -372,7 +372,7 @@ async function visualizeGraph() {
                     ?.push({ to: to, weight: edge.weight, roadType: rType });
                 connectedCount++;
 
-                //// UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
+                // UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
                 // edgeFeatures.push({
                 //     type: "Feature",
                 //     geometry: { type: "LineString", coordinates: [start, end] },
