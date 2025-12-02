@@ -1,19 +1,39 @@
 <script lang="ts" setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, shallowRef } from "vue";
 import "maplibre-gl/dist/maplibre-gl.css";
+import maplibregl from "maplibre-gl"; // Ensure this is imported for Types/Markers
+import { haversine } from "~/assets/utils/helpers";
 import { loadGraph } from "~/assets/utils/clientGraph";
+import RBush from "rbush";
+
+interface NodeIndexItem {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    id: number;
+    coord: [number, number];
+}
 
 const mapEl = ref<HTMLElement | null>(null);
 const map = shallowRef<maplibregl.Map | null>(null);
 
 const loading = ref(false);
-const status = ref("");
 
-const startNode = ref<number | null>(null);
-const adjacency = new Map<number, { to: number; weight: number }[]>();
+//// ROUTING STATE
+const startNodeId = ref<number | null>(null);
+const endNodeId = ref<number | null>(null);
+const startMarker = ref<maplibregl.Marker | null>(null);
+const endMarker = ref<maplibregl.Marker | null>(null);
+const nodeTree = new RBush<NodeIndexItem>();
+
+//// GRAPH DATA
+const adjacency = new Map<
+    number,
+    { to: number; weight: number; roadType: string }[]
+>();
 const nodeCoords = new Map<number, [number, number]>();
 
-// --- INIT ---
 onMounted(async () => {
     if (!mapEl.value) return;
 
@@ -22,109 +42,334 @@ onMounted(async () => {
 
         if (!map.value) return;
 
-        if (map.value.loaded()) {
-            visualizeGraph();
-        } else {
-            map.value.on("load", visualizeGraph);
-        }
-    } catch {}
+        map.value.on("load", visualizeGraph);
+
+        // Listen for clicks to route
+        map.value.on("click", handleMapClick);
+    } catch (e) {
+        console.error(e);
+    }
 });
 
-//VIZUALIZE THE GRAPH
-async function visualizeGraph() {
+//// HANDLE CLICKS
+function handleMapClick(e: maplibregl.MapMouseEvent) {
+    if (adjacency.size === 0) return;
+
+    const clickedCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+    console.log(clickedCoords);
+
+    const nodeId = findClosestNode(clickedCoords);
+
+    if (nodeId === null) {
+        console.warn("No nodes found.");
+        return;
+    }
+
+    const nodeLoc = nodeCoords.get(nodeId);
+    if (!nodeLoc) return;
+
+    if (startNodeId.value === null) {
+        startNodeId.value = nodeId;
+
+        if (startMarker.value) startMarker.value.remove();
+        if (endMarker.value) endMarker.value.remove();
+        endNodeId.value = null;
+        clearRouteLayer();
+
+        startMarker.value = new maplibregl.Marker({ color: "#00FF00" })
+            .setLngLat(nodeLoc as [number, number])
+            .addTo(map.value!);
+    } else {
+        endNodeId.value = nodeId;
+
+        if (endMarker.value) endMarker.value.remove();
+        endMarker.value = new maplibregl.Marker({ color: "#FF0000" })
+            .setLngLat(nodeLoc as [number, number])
+            .addTo(map.value!);
+
+        const path = calculateRoute(startNodeId.value, endNodeId.value);
+
+        if (path) {
+            drawRoute(path);
+            startNodeId.value = null;
+        }
+    }
+}
+
+function buildNodeIndex(nodes: { id: number; lng: number; lat: number }[]) {
+    const items: NodeIndexItem[] = nodes.map((n) => ({
+        minX: n.lng,
+        minY: n.lat,
+        maxX: n.lng,
+        maxY: n.lat,
+        id: n.id,
+        coord: [n.lng, n.lat],
+    }));
+
+    nodeTree.load(items);
+}
+
+//// FIND NEAREST NODE ON CLICK
+function findClosestNode(target: [number, number]): number | null {
+    let closestId: number | null = null;
+    let minDist = Infinity;
+
+    const radius = 0.5;
+
+    const candidates = nodeTree.search({
+        minX: target[0] - radius,
+        minY: target[1] - radius,
+        maxX: target[0] + radius,
+        maxY: target[1] + radius,
+    });
+
+    for (const item of candidates) {
+        const dist = haversine(target, item.coord);
+        if (dist < minDist) {
+            minDist = dist;
+            closestId = item.id;
+        }
+    }
+
+    return closestId;
+}
+
+function toRad(deg: number) {
+    return (deg * Math.PI) / 180;
+}
+
+function toDeg(rad: number) {
+    return (rad * 180) / Math.PI;
+}
+
+function getBearing(start: [number, number], end: [number, number]) {
+    const startLat = toRad(start[1]);
+    const startLng = toRad(start[0]);
+    const endLat = toRad(end[1]);
+    const endLng = toRad(end[0]);
+    const y = Math.sin(endLng - startLng) * Math.cos(endLat);
+    const x =
+        Math.cos(startLat) * Math.sin(endLat) -
+        Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+    const brng = toDeg(Math.atan2(y, x));
+    return (brng + 360) % 360;
+}
+
+function getSignedAngle(
+    p1: [number, number],
+    p2: [number, number],
+    p3: [number, number]
+) {
+    const b1 = getBearing(p1, p2);
+    const b2 = getBearing(p2, p3);
+    let diff = b2 - b1;
+    while (diff <= -180) diff += 360;
+    while (diff > 180) diff -= 360;
+    return diff;
+}
+
+//// DIJKSTRA ALGORITHM + COST
+function calculateRoute(start: number, end: number): [number, number][] | null {
+    const costs = new Map<number, number>();
+    const previous = new Map<number, number>();
+    const pq = new Set<number>();
+
+    costs.set(start, 0);
+    pq.add(start);
+
+    while (pq.size > 0) {
+        let currentId: number | null = null;
+        let lowestCost = Infinity;
+
+        for (const id of pq) {
+            const c = costs.get(id) ?? Infinity;
+            if (c < lowestCost) {
+                lowestCost = c;
+                currentId = id;
+            }
+        }
+
+        if (currentId === null) break;
+        if (currentId === end) break;
+
+        pq.delete(currentId);
+
+        const neighbors = adjacency.get(currentId) || [];
+        const currentCoord = nodeCoords.get(currentId);
+        const prevId = previous.get(currentId);
+        const prevCoord = prevId !== undefined ? nodeCoords.get(prevId) : null;
+
+        for (const edge of neighbors) {
+            const neighborId = edge.to;
+
+            let stepCost = edge.weight || 1;
+            const neighborCoord = nodeCoords.get(neighborId);
+
+            if (prevCoord && currentCoord && neighborCoord) {
+                const angle = getSignedAngle(
+                    prevCoord,
+                    currentCoord,
+                    neighborCoord
+                );
+                const absAngle = Math.abs(angle);
+
+                //// 1.MANUAL ROUNDABOUT
+                if (edge.roadType === "roundabout") {
+                    stepCost *= 0.5;
+
+                    if (angle < -100) {
+                        stepCost += 10000;
+                    }
+                }
+
+                //// 2. GLOBAL SAFETY
+                if (absAngle > 100) {
+                    stepCost += 1000.0;
+                }
+
+                //// 3. WRONG WAY SHORTCUTS
+                else if (angle < -100) {
+                    stepCost += 1000.0;
+                }
+
+                //// 4. HIGHWAY FLOW
+                else if (absAngle < 20) {
+                    stepCost *= 0.9;
+                }
+
+                //// 5. STANDARD TURNS
+                else {
+                    stepCost += 0.05;
+                }
+            }
+
+            if (stepCost < 1) stepCost = 1;
+            const newTotalCost = lowestCost + stepCost;
+            const oldCost = costs.get(neighborId) ?? Infinity;
+
+            if (newTotalCost < oldCost) {
+                costs.set(neighborId, newTotalCost);
+                previous.set(neighborId, currentId);
+                pq.add(neighborId);
+            }
+        }
+    }
+
+    if (!previous.has(end) && start !== end) return null;
+
+    const path: [number, number][] = [];
+    let curr: number | undefined = end;
+    while (curr !== undefined) {
+        const coord = nodeCoords.get(curr);
+        if (coord) path.unshift(coord);
+        curr = previous.get(curr);
+    }
+
+    return path;
+}
+
+//// DRAWING THE ROUTE
+function drawRoute(coords: [number, number][]) {
     if (!map.value) return;
 
+    const source = map.value.getSource(
+        "debug-route"
+    ) as maplibregl.GeoJSONSource;
+    if (source) {
+        source.setData({
+            type: "FeatureCollection",
+            features: [
+                {
+                    type: "Feature",
+                    properties: {},
+                    geometry: {
+                        type: "LineString",
+                        coordinates: coords,
+                    },
+                },
+            ],
+        });
+    }
+}
+
+//// CLEARS CURRENT ROUTE ON CLICKING AFTER SUCCESSFUL ROUTE
+function clearRouteLayer() {
+    if (!map.value) return;
+    const source = map.value.getSource(
+        "debug-route"
+    ) as maplibregl.GeoJSONSource;
+    if (source) {
+        source.setData({ type: "FeatureCollection", features: [] });
+    }
+}
+
+//// GRAPH DRAWING
+async function visualizeGraph() {
+    if (!map.value) return;
     loading.value = true;
-    status.value = "Downloading Graph Data...";
 
     try {
         const { nodes, edges } = await loadGraph();
-
         adjacency.clear();
         nodeCoords.clear();
 
-        status.value = `Stitching ${nodes.length} nodes...`;
-
-        // --- STEP 1: SPATIAL MERGE (THE FIX) ---
-        // We map "Lat,Lng" strings to a single "Master ID"
         const spatialIndex = new Map<string, number>();
-        const idRedirect = new Map<number, number>(); // Maps Old ID -> Master ID
-        const uniqueNodes: any[] = []; // Only keep unique nodes for visuals
+        const idRedirect = new Map<number, number>();
+        const uniqueNodes: any[] = [];
 
         for (const node of nodes) {
-            // Round to ~1 meter precision (5 decimals) to snap close points
             const key = `${node.lat.toFixed(5)},${node.lng.toFixed(5)}`;
 
             if (spatialIndex.has(key)) {
-                // DUPLICATE FOUND!
-                // This node is in the same spot as a previous one.
-                // We will ignore this new ID and point it to the old Master ID.
                 const masterId = spatialIndex.get(key)!;
                 idRedirect.set(node.id, masterId);
             } else {
-                // NEW UNIQUE NODE
                 spatialIndex.set(key, node.id);
-                idRedirect.set(node.id, node.id); // Maps to itself
-
-                // Store Data
+                idRedirect.set(node.id, node.id);
                 nodeCoords.set(node.id, [node.lng, node.lat]);
                 adjacency.set(node.id, []);
                 uniqueNodes.push(node);
             }
         }
 
-        // --- STEP 2: VISUALIZE NODES ---
-        const nodeFeatures: any[] = uniqueNodes.map((node) => ({
-            type: "Feature",
-            geometry: { type: "Point", coordinates: [node.lng, node.lat] },
-            properties: { id: node.id },
-        }));
+        //// CREATING BBOX FOR NODES (FASTER SEARCH)
+        buildNodeIndex(uniqueNodes);
 
-        // --- STEP 3: BUILD EDGES (USING REDIRECTED IDs) ---
+        //// BUILD EDGES
         const edgeFeatures: any[] = [];
+        let connectedCount = 0;
 
         for (const edge of edges) {
-            // CONVERT IDs: Transform raw IDs to the "Master" IDs
             const u = idRedirect.get(edge.from);
             const v = idRedirect.get(edge.to);
 
-            // Safety check
-            if (u === undefined || v === undefined) continue;
-            if (u === v) continue; // Don't allow self-loops (tiny errors)
+            if (u === undefined || v === undefined || u === v) continue;
 
-            // Get Coords for Visuals
             const start = nodeCoords.get(u);
             const end = nodeCoords.get(v);
 
             if (start && end) {
-                // LOGIC: Add connection using Master IDs
-                adjacency.get(u)?.push({ to: v, weight: edge.weight });
-                adjacency.get(v)?.push({ to: u, weight: edge.weight }); // Bi-directional
+                const rType = edge.properties?.roadType || "local";
+                adjacency
+                    .get(u)
+                    ?.push({ to: v, weight: edge.weight, roadType: rType });
+                connectedCount++;
 
-                // VISUALS
-                edgeFeatures.push({
-                    type: "Feature",
-                    geometry: {
-                        type: "LineString",
-                        coordinates: [start, end],
-                    },
-                    properties: {
-                        weight: edge.weight,
-                        color:
-                            edge.properties?.roadType === "freeway"
-                                ? "#ff00ff"
-                                : "#00ff00",
-                    },
-                });
+                //// UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
+                // edgeFeatures.push({
+                //     type: "Feature",
+                //     geometry: { type: "LineString", coordinates: [start, end] },
+                //     properties: {
+                //         weight: edge.weight,
+                //         color:
+                //             edge.properties?.roadType === "freeway"
+                //                 ? "#ff00ff"
+                //                 : "#00ff00",
+                //     },
+                // });
             }
         }
 
-        status.value = `Graph Ready. Merged ${
-            nodes.length - uniqueNodes.length
-        } duplicates.`;
-
-        // --- RENDER ---
-        // Route Layer
         if (!map.value.getSource("debug-route")) {
             map.value.addSource("debug-route", {
                 type: "geojson",
@@ -138,172 +383,55 @@ async function visualizeGraph() {
                 paint: {
                     "line-color": "#FFD700",
                     "line-width": 6,
-                    "line-opacity": 0.8,
+                    "line-opacity": 0.9,
                 },
             });
         }
 
-        setupRouteClicks();
-
-        // Edges
-        map.value.addSource("debug-edges", {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: edgeFeatures },
-        });
-        map.value.addLayer({
-            id: "debug-edges-lines",
-            type: "line",
-            source: "debug-edges",
-            layout: { "line-join": "round", "line-cap": "round" },
-            paint: {
-                "line-color": ["get", "color"],
-                "line-width": 1.5,
-                "line-opacity": 0.6,
-            },
-        });
-
-        // Nodes
-        map.value.addSource("debug-nodes", {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: nodeFeatures },
-        });
-        map.value.addLayer({
-            id: "debug-nodes-points",
-            type: "circle",
-            source: "debug-nodes",
-            paint: {
-                "circle-radius": 5,
-                "circle-color": "#ffffff",
-                "circle-opacity": 0.8,
-            },
-        });
+        //// UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
+        // if (!map.value.getSource("debug-edges")) {
+        //     map.value.addSource("debug-edges", {
+        //         type: "geojson",
+        //         data: { type: "FeatureCollection", features: edgeFeatures },
+        //     });
+        //     map.value.addLayer({
+        //         id: "debug-edges-lines",
+        //         type: "line",
+        //         source: "debug-edges",
+        //         layout: { "line-join": "round", "line-cap": "round" },
+        //         paint: {
+        //             "line-color": ["get", "color"],
+        //             "line-width": 1.5,
+        //             "line-opacity": 0.4,
+        //         },
+        //     });
+        //     if (!map.value.getLayer("debug-edges-arrows")) {
+        //         map.value.addLayer({
+        //             id: "debug-edges-arrows",
+        //             type: "symbol",
+        //             source: "debug-edges",
+        //             minzoom: 9,
+        //             layout: {
+        //                 "symbol-placement": "line",
+        //                 "symbol-spacing": 50,
+        //                 "text-field": "▶",
+        //                 "text-size": 18,
+        //                 "text-keep-upright": false,
+        //                 "text-allow-overlap": true,
+        //             },
+        //             paint: {
+        //                 "text-color": "#ffffff",
+        //                 "text-halo-color": "#000000",
+        //                 "text-halo-width": 2,
+        //             },
+        //         });
+        //     }
+        // }
 
         loading.value = false;
-        console.log("Graph stitched and loaded.");
     } catch (err) {
         console.error("Error loading graph:", err);
-        status.value = "Error loading data.";
     }
-}
-
-function setupRouteClicks() {
-    if (!map.value) return;
-
-    // 1. Change cursor to pointer (Hand icon)
-    map.value.on("mouseenter", "debug-nodes-points", () => {
-        if (map.value) map.value.getCanvas().style.cursor = "pointer";
-    });
-
-    // 2. Reset cursor
-    map.value.on("mouseleave", "debug-nodes-points", () => {
-        if (map.value) map.value.getCanvas().style.cursor = "";
-    });
-
-    // 3. Handle Click
-    map.value.on("click", "debug-nodes-points", (e) => {
-        const feature = e.features?.[0];
-        if (!feature) return;
-
-        // Force ID to be a number
-        const id = Number(feature.properties?.id);
-
-        console.log("Clicked Node ID:", id); // Check your browser console!
-
-        if (startNode.value === null) {
-            // SET START
-            startNode.value = id;
-            status.value = `Start Node ${id} selected. Click destination.`;
-
-            // Trigger a repaint to show the green dot (if you used the paint logic above)
-            map.value?.setPaintProperty("debug-nodes-points", "circle-color", [
-                "case",
-                ["==", ["get", "id"], id],
-                "#00FF00", // Start is Green
-                "#ffffff",
-            ]);
-        } else {
-            // SET END & CALCULATE
-            status.value = `Calculating path from ${startNode.value} to ${id}...`;
-            calculateShortestPath(startNode.value, id);
-
-            // Reset Start
-            startNode.value = null;
-
-            // Reset colors
-            map.value?.setPaintProperty(
-                "debug-nodes-points",
-                "circle-color",
-                "#ffffff"
-            );
-        }
-    });
-}
-
-function calculateShortestPath(startId: number, endId: number) {
-    const dist = new Map<number, number>();
-    const prev = new Map<number, number>();
-    const queue = new Set<number>();
-
-    dist.set(startId, 0);
-    queue.add(startId);
-
-    let found = false;
-
-    // Basic Dijkstra
-    while (queue.size > 0) {
-        // Get node with smallest distance
-        let u: number | null = null;
-        let minDist = Infinity;
-        for (const node of queue) {
-            const d = dist.get(node) || Infinity;
-            if (d < minDist) {
-                minDist = d;
-                u = node;
-            }
-        }
-
-        if (u === null) break;
-        queue.delete(u);
-
-        if (u === endId) {
-            found = true;
-            break;
-        }
-
-        const neighbors = adjacency.get(u) || [];
-        for (const n of neighbors) {
-            const alt = (dist.get(u) || 0) + n.weight;
-            if (alt < (dist.get(n.to) || Infinity)) {
-                dist.set(n.to, alt);
-                prev.set(n.to, u);
-                queue.add(n.to);
-            }
-        }
-    }
-
-    if (!found) {
-        status.value = "No Route Found (Gap in road?)";
-        alert("Road is disconnected!");
-        return;
-    }
-
-    // Reconstruct Path
-    const path: number[][] = [];
-    let curr: number | undefined = endId;
-    while (curr !== undefined) {
-        const c = nodeCoords.get(curr);
-        if (c) path.unshift(c);
-        curr = prev.get(curr);
-    }
-
-    // Draw Line
-    (map.value?.getSource("debug-route") as any).setData({
-        type: "Feature",
-        geometry: { type: "LineString", coordinates: path },
-        properties: {},
-    });
-
-    status.value = `Route Found: ${path.length} nodes`;
 }
 </script>
 

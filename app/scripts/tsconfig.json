@@ -1,0 +1,10 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "module": "commonjs",
+        "moduleResolution": "node",
+        "ignoreDeprecations": "6.0"
+    },
+    "include": ["**/*.ts"]
+}

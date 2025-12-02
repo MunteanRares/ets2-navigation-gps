@@ -58,7 +58,6 @@ function coordKey(c: Coord) {
     )}`;
 }
 
-//// Reading GeoJSON
 function readGeojson(inputDir: string): InputGeoJSON {
     const raw = readFileSync(inputDir, "utf8");
     const geo = JSON.parse(raw) as InputGeoJSON;
@@ -66,7 +65,6 @@ function readGeojson(inputDir: string): InputGeoJSON {
     return geo;
 }
 
-//// Creating Rbush bbox
 function createBbox(features: InputFeature[]) {
     const tree = new RBush<BBoxItem>();
     const bboxes: Array<[number, number, number, number]> = new Array(
@@ -89,7 +87,6 @@ function createBbox(features: InputFeature[]) {
     return { tree, bboxes };
 }
 
-//// Storing the first and the last points in a feature (road)
 function storeFeaturePoints(features: InputFeature[]) {
     const splitPointsToMap: Map<number, Set<string>> = new Map();
     for (let i = 0; i < features.length; i++)
@@ -104,6 +101,61 @@ function storeFeaturePoints(features: InputFeature[]) {
         }
     }
 
+    //// This connects highway ramps and roundabouts that aren't perfectly drawn
+    console.log("Injecting intersections for connectivity...");
+
+    const tree = new RBush<BBoxItem>();
+    for (let i = 0; i < features.length; i++) {
+        const bbox = turf.bbox(features[i] as any);
+        tree.insert({
+            minX: bbox[0],
+            minY: bbox[1],
+            maxX: bbox[2],
+            maxY: bbox[3],
+            idx: i,
+        });
+    }
+
+    const injectPoint = (pt: Coord, sourceIdx: number) => {
+        const searchDistDeg = 0.0002;
+        const candidates = tree.search({
+            minX: pt[0] - searchDistDeg,
+            minY: pt[1] - searchDistDeg,
+            maxX: pt[0] + searchDistDeg,
+            maxY: pt[1] + searchDistDeg,
+        });
+
+        for (const item of candidates) {
+            if (item.idx === sourceIdx) continue;
+
+            const candidateLine = features[item.idx];
+            const pointGeo = turf.point(pt);
+
+            // Snap the endpoint to the nearby line
+            const snapped = turf.nearestPointOnLine(
+                candidateLine as any,
+                pointGeo,
+                { units: "kilometers" }
+            );
+
+            // If it's close enough (< 5 meters), force a connection
+            if (
+                snapped.properties.dist !== undefined &&
+                snapped.properties.dist < 0.005
+            ) {
+                const snapCoord = snapped.geometry.coordinates as Coord;
+                splitPointsToMap.get(item.idx)?.add(coordKey(snapCoord));
+            }
+        }
+    };
+
+    for (let i = 0; i < features.length; i++) {
+        const coords = features[i].geometry.coordinates;
+        if (!coords || coords.length < 2) continue;
+        injectPoint(coords[0], i); // Connect Start
+        injectPoint(coords[coords.length - 1], i); // Connect End
+    }
+
     return splitPointsToMap;
 }
 
@@ -115,7 +167,6 @@ function snapEndpoints(
         `Snapping endpoints with ${toleranceMeters}m tolerance (rbush)...`
     );
 
-    // quick meters -> degrees approx (latitude). Good enough for small tolerances.
     const metersToDeg = (m: number) => m / 111320;
     const degThreshold = metersToDeg(toleranceMeters);
 
@@ -124,7 +175,7 @@ function snapEndpoints(
         minY: number;
         maxX: number;
         maxY: number;
-        id: number; // unique endpoint id
+        id: number;
         featureIdx: number;
         isStart: boolean;
         coord: Coord;
@@ -132,7 +183,6 @@ function snapEndpoints(
 
     const tree = new RBush<EPItem>();
 
-    // build endpoint list + RBush index
     const endpoints: EPItem[] = [];
     let eid = 0;
     for (let i = 0; i < features.length; i++) {
@@ -173,12 +223,10 @@ function snapEndpoints(
     const visited = new Set<number>();
     const snappingMap = new Map<string, Coord>();
 
-    // For each endpoint, query nearby endpoints and cluster by distance
     for (let i = 0; i < endpoints.length; i++) {
         const ep = endpoints[i]!;
         if (visited.has(ep.id)) continue;
 
-        // Query square bbox expanded by degThreshold
         const qBox = {
             minX: ep.coord[0] - degThreshold,
             minY: ep.coord[1] - degThreshold,
@@ -199,7 +247,6 @@ function snapEndpoints(
         }
 
         if (cluster.length > 1) {
-            // compute centroid (simple average)
             let sumLng = 0;
             let sumLat = 0;
             for (const m of cluster) {
@@ -211,7 +258,6 @@ function snapEndpoints(
                 sumLat / cluster.length,
             ];
 
-            // normalize centroid decimals to keep consistent coordKey behavior
             const snapped: Coord = [
                 Number(centroid[0].toFixed(COORD_MAX_DECIMALS)),
                 Number(centroid[1].toFixed(COORD_MAX_DECIMALS)),
@@ -223,11 +269,6 @@ function snapEndpoints(
         }
     }
 
-    console.log(
-        `Created ${snappingMap.size} snapping mappings (endpoint clusters)`
-    );
-
-    // Apply snapping: only points that are in snappingMap will be changed (so non-endpoint vertices unaffected)
     const out = features.map((feature) => {
         const coords = feature.geometry.coordinates;
         const newCoords = coords.map((coord) => {
@@ -248,59 +289,6 @@ function snapEndpoints(
     return out;
 }
 
-//// Get the bboxes that intersect with the current bbox, then check from that smaller area if they actually intersect.
-function checkIntersectionsAndAdd(
-    features: InputFeature[],
-    bboxes: [number, number, number, number][],
-    tree: RBush<BBoxItem>,
-    splitPointsToMap: Map<number, Set<string>>
-) {
-    for (let i = 0; i < features.length; i++) {
-        // if (i % 200 === 0)
-        //     console.log(`Intersect pass feature ${i}/${features.length}`);
-
-        const bbox = bboxes?.[i];
-        if (bbox) {
-            const item = tree.search({
-                minX: bbox[0],
-                minY: bbox[1],
-                maxX: bbox[2],
-                maxY: bbox[3],
-            }) as BBoxItem[];
-
-            for (const neighbor of item) {
-                const j = neighbor.idx;
-                if (j <= i) continue;
-
-                const f1 = features[i];
-                const f2 = features[j];
-                try {
-                    const intersection = turf.lineIntersect(
-                        f1 as any,
-                        f2 as any
-                    );
-                    if (intersection) {
-                        for (const point of intersection.features) {
-                            const coords = (point.geometry as any)
-                                .coordinates as Coord;
-                            const k = coordKey(coords);
-                            splitPointsToMap.get(i)?.add(k);
-                            splitPointsToMap.get(j)?.add(k);
-                        }
-                    }
-                } catch (err) {
-                    console.warn(
-                        `lineIntersect failed for pair ${i} and ${j} - skipping...`,
-                        (err as Error).message || err
-                    );
-                }
-            }
-        }
-    }
-
-    return splitPointsToMap;
-}
-
 /* Creates a line from features that gets simplified ->
 -> from all the points that are `splitting` the line we create an array ->
 -> we create another array containing the point coords and the distance from the coords[0] (start) of the line ->
@@ -311,17 +299,13 @@ function checkIntersectionsAndAdd(
 -> we create nodes for each point with distance that is ordered ->
 -> we create edges from node to node + 1.
 */
-//// Creating lines and ptsArr
+
 function createLinePointsArray(
     feature: InputFeature,
     splitPointsToMap: Map<number, Set<string>>,
     i: number
 ) {
     let line = turf.lineString(feature?.geometry.coordinates);
-    line = turf.simplify(line, {
-        tolerance: 0.01,
-        highQuality: true,
-    });
 
     const ptsSet = splitPointsToMap.get(i)!;
     const ptsArr: Coord[] = Array.from(ptsSet).map((set) => {
@@ -334,7 +318,6 @@ function createLinePointsArray(
     return { line, ptsSet, ptsArr };
 }
 
-/// Creating points with distances
 function createPointsWithDistance(
     ptsSet: Set<string>,
     ptsArr: Coord[],
@@ -399,7 +382,7 @@ function createPointsWithDistance(
     return pointsWithDistance;
 }
 
-//// Cleanup pointsWithDistances if too close to eachother
+//// CLEANUP IF POINTS ARE TOO CLOSE TO EACHOTHER (OPTIONAL)
 function cleanUpPoints(pointsWithDistance: { coord: Coord; locKm: number }[]) {
     const cleaned: Coord[] = [];
     let lastLoc = -1;
@@ -413,82 +396,256 @@ function cleanUpPoints(pointsWithDistance: { coord: Coord; locKm: number }[]) {
 }
 
 //// PROCESS POINTS AND LINES AND CREATE NODES AND EDGES
+
+function toRad(deg: number) {
+    return (deg * Math.PI) / 180;
+}
+function toDeg(rad: number) {
+    return (rad * 180) / Math.PI;
+}
+
+function getBearing(start: Coord, end: Coord) {
+    const startLat = toRad(start[1]);
+    const startLng = toRad(start[0]);
+    const endLat = toRad(end[1]);
+    const endLng = toRad(end[0]);
+
+    const y = Math.sin(endLng - startLng) * Math.cos(endLat);
+    const x =
+        Math.cos(startLat) * Math.sin(endLat) -
+        Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+    const brng = toDeg(Math.atan2(y, x));
+    return (brng + 360) % 360;
+}
+
 function createNodesAndEdges(
     features: InputFeature[],
     splitPointsToMap: Map<number, Set<string>>
 ) {
-    const nodeMap = new Map<string, number>(); // -> we will take use of coordKey and connect it to a nodeId
+    // 1. SETUP
+    interface NodeItem {
+        minX: number;
+        minY: number;
+        maxX: number;
+        maxY: number;
+        id: number;
+        coord: Coord;
+    }
+    const nodeTree = new RBush<NodeItem>();
     const nodes: Node[] = [];
     const edges: Edge[] = [];
+    const nodeMap = new Map<string, number>();
 
-    function getOrCreateNodeId(coord: Coord) {
+    // Store Topology: NodeID -> List of connected features
+    const nodeTopology = new Map<
+        number,
+        { fIdx: number; isStart: boolean; bearing: number }[]
+    >();
+
+    function getOrCreateNodeId(coord: Coord): number {
         const k = coordKey(coord);
-        const existing = nodeMap.get(k);
-        if (existing !== undefined) return existing;
+        const existingExact = nodeMap.get(k);
+        if (existingExact !== undefined) return existingExact;
+
+        const toleranceDeg = 0.000005; // ~0.5m
+        const candidates = nodeTree.search({
+            minX: coord[0] - toleranceDeg,
+            minY: coord[1] - toleranceDeg,
+            maxX: coord[0] + toleranceDeg,
+            maxY: coord[1] + toleranceDeg,
+        });
+
+        for (const c of candidates) {
+            if (haversine(coord, c.coord) < 0.5) {
+                nodeMap.set(k, c.id);
+                return c.id;
+            }
+        }
         const id = nodes.length;
-        nodes.push({
-            id,
-            lng: Number(coord[0].toFixed(COORD_MAX_DECIMALS)),
-            lat: Number(coord[1].toFixed(COORD_MAX_DECIMALS)),
+        const lng = Number(coord[0].toFixed(COORD_MAX_DECIMALS));
+        const lat = Number(coord[1].toFixed(COORD_MAX_DECIMALS));
+        nodes.push({ id, lng, lat });
+        nodeTree.insert({
+            minX: lng,
+            minY: lat,
+            maxX: lng,
+            maxY: lat,
+            id: id,
+            coord: [lng, lat],
         });
         nodeMap.set(k, id);
-
         return id;
     }
 
+    const processedFeatures: any[] = new Array(features.length);
+
+    console.log("Pass 1: Analysis...");
     for (let i = 0; i < features.length; i++) {
-        if (i % 200 == 0)
-            console.log(`Segmenting the feature ${i}/${features.length}`);
-
         const feature = features[i];
-        if (feature?.geometry.coordinates) {
-            const { line, ptsSet, ptsArr } = createLinePointsArray(
-                feature,
-                splitPointsToMap,
-                i
+        if (
+            !feature?.geometry.coordinates ||
+            feature.geometry.coordinates.length < 2
+        )
+            continue;
+
+        const result = createLinePointsArray(feature, splitPointsToMap, i);
+        if (!result) continue;
+
+        const { line, ptsSet, ptsArr } = result;
+        const pointsWithDistance = createPointsWithDistance(
+            ptsSet,
+            ptsArr,
+            line,
+            feature
+        );
+        pointsWithDistance.sort((a, b) => a.locKm - b.locKm);
+        const cleaned = cleanUpPoints(pointsWithDistance);
+
+        if (cleaned.length > 1) {
+            processedFeatures[i] = cleaned;
+
+            const startNodeId = getOrCreateNodeId(cleaned[0]);
+            const endNodeId = getOrCreateNodeId(cleaned[cleaned.length - 1]);
+
+            const startBearing = getBearing(cleaned[0], cleaned[1]);
+            const endBearing = getBearing(
+                cleaned[cleaned.length - 2],
+                cleaned[cleaned.length - 1]
             );
 
-            const pointsWithDistance = createPointsWithDistance(
-                ptsSet,
-                ptsArr,
-                line,
-                feature
-            );
+            if (!nodeTopology.has(startNodeId))
+                nodeTopology.set(startNodeId, []);
+            nodeTopology
+                .get(startNodeId)!
+                .push({ fIdx: i, isStart: true, bearing: startBearing });
 
-            // Sort the points by distance
-            pointsWithDistance.sort((a, b) => a.locKm - b.locKm);
+            if (!nodeTopology.has(endNodeId)) nodeTopology.set(endNodeId, []);
+            nodeTopology
+                .get(endNodeId)!
+                .push({ fIdx: i, isStart: false, bearing: endBearing });
+        }
+    }
 
-            const cleaned = cleanUpPoints(pointsWithDistance);
+    console.log("Pass 2: Topology Inference...");
+    const directionInference = new Int8Array(features.length);
+    for (let i = 0; i < features.length; i++) {
+        if (!processedFeatures[i]) continue;
+        const pts = processedFeatures[i];
 
-            for (let point = 0; point < cleaned.length - 1; point++) {
-                const firstFromPair = cleaned[point]!;
-                const secondFromPair = cleaned[point + 1]!;
+        const startNodeId = getOrCreateNodeId(pts[0]);
+        const endNodeId = getOrCreateNodeId(pts[pts.length - 1]);
 
-                const distance = haversine(firstFromPair, secondFromPair);
-                if (distance < 0) continue;
+        const myStartBearing = getBearing(pts[0], pts[1]);
+        const myEndBearing = getBearing(
+            pts[pts.length - 2],
+            pts[pts.length - 1]
+        );
 
-                const idfirst = getOrCreateNodeId(firstFromPair);
-                const idsecond = getOrCreateNodeId(secondFromPair);
+        let forwardVotes = 0;
+        let backwardVotes = 0;
 
-                const eprops = {
-                    featureId: feature.properties.id ?? null,
-                    roadType: feature.properties.roadType ?? null,
-                };
+        const startNeighbors = nodeTopology.get(startNodeId) || [];
+        for (const n of startNeighbors) {
+            if (n.fIdx === i) continue;
+            let angleDiff = Math.abs(n.bearing - myStartBearing);
+            if (angleDiff > 180) angleDiff = 360 - angleDiff;
 
+            // If neighbor Ends here (isStart=false) and aligns < 60 deg, it feeds us
+            if (n.isStart === false && angleDiff < 60) forwardVotes++;
+            // If neighbor Starts here and aligns, it feeds backwards
+            if (n.isStart === true && angleDiff < 60) backwardVotes++;
+        }
+
+        const endNeighbors = nodeTopology.get(endNodeId) || [];
+        for (const n of endNeighbors) {
+            if (n.fIdx === i) continue;
+            let angleDiff = Math.abs(n.bearing - myEndBearing);
+            if (angleDiff > 180) angleDiff = 360 - angleDiff;
+
+            // If neighbor Starts here (isStart=true) and aligns < 60 deg, we feed it
+            if (n.isStart === true && angleDiff < 60) forwardVotes++;
+            // If neighbor Ends here and aligns, we feed it backwards
+            if (n.isStart === false && angleDiff < 60) backwardVotes++;
+        }
+
+        if (forwardVotes > backwardVotes) directionInference[i] = 1;
+        else if (backwardVotes > forwardVotes) directionInference[i] = -1;
+        else directionInference[i] = 0;
+    }
+
+    console.log("Pass 3: Generating Edges...");
+    for (let i = 0; i < features.length; i++) {
+        if (!processedFeatures[i]) continue;
+        const cleaned = processedFeatures[i];
+        const feature = features[i];
+        const props = feature.properties || {};
+
+        const isRoundabout = props.roadType === "roundabout";
+        const isFreeway =
+            props.roadType === "freeway" || props.roadType === "divided";
+        const inferredDir = directionInference[i];
+
+        // --- SEGMENT LOOP ---
+        for (let point = 0; point < cleaned.length - 1; point++) {
+            const startCoord = cleaned[point];
+            const endCoord = cleaned[point + 1];
+            const firstFromPair = getOrCreateNodeId(startCoord);
+            const secondFromPair = getOrCreateNodeId(endCoord);
+
+            if (firstFromPair === secondFromPair) continue;
+
+            const distance = haversine(startCoord, endCoord);
+            if (distance <= 0) continue;
+
+            let forwardWeight = distance;
+            let backwardWeight = distance;
+
+            const PENALTY_FLAT = 500;
+            const STRICT_BLOCK = Infinity;
+
+            // === LOGIC TIER ===
+
+            if (isRoundabout) {
+                backwardWeight = STRICT_BLOCK;
+            } else if (isFreeway) {
+                const laneSaysForward = (props.rightLanes || 0) > 0;
+                const laneSaysBackward = (props.leftLanes || 0) > 0;
+
+                // Combine Lane Data + Topology Inference
+                if (inferredDir === 1) {
+                    backwardWeight = distance + PENALTY_FLAT;
+                } else if (inferredDir === -1) {
+                    forwardWeight = distance + PENALTY_FLAT;
+                } else {
+                    if (laneSaysForward && !laneSaysBackward)
+                        backwardWeight = distance + PENALTY_FLAT;
+                    else if (laneSaysBackward && !laneSaysForward)
+                        forwardWeight = distance + PENALTY_FLAT;
+                }
+            }
+
+            const eprops = {
+                featureId: props.id,
+                roadType: props.roadType,
+                leftLanes: props.leftLanes,
+                rightLanes: props.rightLanes,
+            };
+
+            if (forwardWeight !== Infinity) {
                 edges.push({
-                    from: idfirst,
-                    to: idsecond,
-                    weight: distance,
-                    featureId: feature.properties?.id ?? null,
+                    from: firstFromPair,
+                    to: secondFromPair,
+                    weight: forwardWeight,
+                    featureId: eprops.featureId,
                     properties: eprops,
                 });
-
-                // For future: if oneway then skip this
+            }
+            if (backwardWeight !== Infinity) {
                 edges.push({
-                    from: idsecond,
-                    to: idfirst,
-                    weight: distance,
-                    featureId: feature.properties?.id ?? null,
+                    from: secondFromPair,
+                    to: firstFromPair,
+                    weight: backwardWeight,
+                    featureId: eprops.featureId,
                     properties: eprops,
                 });
             }
@@ -498,7 +655,7 @@ function createNodesAndEdges(
     return { nodes, edges };
 }
 
-//// Saves the node.json and edges.json to the disk.
+//// SAVES THE NODES.JSON AND EDGES.JSON TO DISK
 function saveFilesToDisk(
     outDir: any,
     nodes: Node[],
@@ -534,12 +691,10 @@ async function saveGraphAsGeoJSON(
 
     const stream = createWriteStream(filePath, { encoding: "utf8" });
 
-    // Write Header
     stream.write('{\n"type": "FeatureCollection",\n"features": [\n');
 
     let isFirst = true;
 
-    // 1. Write Nodes
     for (const node of nodes) {
         if (!isFirst) stream.write(",\n");
         const feature = {
@@ -557,7 +712,6 @@ async function saveGraphAsGeoJSON(
         isFirst = false;
     }
 
-    // 2. Write Edges
     for (const edge of edges) {
         const fromNode = nodes[edge.from];
         const toNode = nodes[edge.to];
@@ -585,7 +739,6 @@ async function saveGraphAsGeoJSON(
         isFirst = false;
     }
 
-    // Write Footer
     stream.write("\n]\n}");
     stream.end();
 
@@ -599,24 +752,32 @@ function buildGraph(inputDir: string, outDir: string) {
     console.log("Loading GeoJSON: ", inputDir);
     const geo = readGeojson(inputDir);
     let features = geo.features;
+    // const countBefore = features.length;
 
-    features = snapEndpoints(features, 100);
+    features = features
+        .filter((f) => {
+            if (!f.geometry || !f.geometry.coordinates) return false;
+            if (f.geometry.coordinates.length < 2) return false;
+            return true;
+        })
+        .map((f, index) => {
+            if (!f.properties) f.properties = {};
 
-    console.log("Building RBush tree bounding box for features...");
-    const { tree, bboxes } = createBbox(features);
+            if (!f.properties.id) f.properties.id = `manual_fix_${index}`;
+
+            if (!f.properties.roadType) f.properties.roadType = "road";
+
+            return f;
+        });
+
+    features = snapEndpoints(features, 0.1);
 
     console.log("Detecting intersection points between bbox neighbors...");
     splitPointsToMap = storeFeaturePoints(features);
-    // splitPointsToMap = checkIntersectionsAndAdd(
-    //     features,
-    //     bboxes,
-    //     tree,
-    //     splitPointsToMap
-    // );
 
     console.log("Collected intersection points. Now building nodes & edges...");
     const { nodes, edges } = createNodesAndEdges(features, splitPointsToMap);
-    saveGraphAsGeoJSON(outDir, nodes, edges);
+    // saveGraphAsGeoJSON(outDir, nodes, edges);
 
     saveFilesToDisk(outDir, nodes, edges, features);
     console.log("Graph saved to:", outDir);
