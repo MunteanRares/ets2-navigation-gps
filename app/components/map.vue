@@ -115,7 +115,7 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
 }
 
 function getClosestNodes(target: [number, number], limit = 5): number[] {
-    const radius = 0.3;
+    const radius = 0.5;
 
     const candidates = nodeTree.search({
         minX: target[0] - radius,
