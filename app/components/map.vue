@@ -45,6 +45,7 @@ const truckEl = ref<HTMLElement | null>(null);
 const startNodeId = ref<number | null>(null);
 const endNodeId = ref<number | null>(null);
 const endMarker = ref<maplibregl.Marker | null>(null);
+const startNodeType = ref<"road" | "yard">("road");
 
 //// COMPOSABLES
 const {
@@ -195,8 +196,11 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
 
     const startConfig = findBestStartConfiguration(
         truckCoords,
-        truckHeading.value
+        truckHeading.value,
+        10
     );
+
+    startNodeType.value = startConfig!.type as "road" | "yard";
 
     if (!startConfig) {
         console.warn("Could not find a valid road matching truck heading.");
@@ -243,7 +247,8 @@ function handleMapClick(e: maplibregl.MapMouseEvent) {
         new Set([bestEndNode]),
         truckHeading.value,
         adjacency,
-        nodeCoords
+        nodeCoords,
+        startNodeType.value
     );
 
     if (result) {
@@ -287,7 +292,7 @@ function findBestStartConfiguration(
 ) {
     const truckPt = point(truckCoords);
 
-    const roadCandidates = getClosestNodes(truckCoords, searchRadius);
+    const roadCandidates = getClosestNodes(truckCoords, searchRadius, 0.03);
     let bestRoadEdge = null;
     let minRoadDist = Infinity;
 
@@ -325,9 +330,12 @@ function findBestStartConfiguration(
 
     if (bestRoadEdge) return bestRoadEdge;
 
-    const yardCandidates = getClosestNodes(truckCoords, 200);
+    const yardCandidates = getClosestNodes(truckCoords, 20, 0.3);
 
-    if (yardCandidates.length === 0) return null;
+    if (yardCandidates.length === 0) {
+        console.warn("No nodes found even with large radius.");
+        return null;
+    }
 
     let closestNodeId: number | null = null;
     let minNodeDist = Infinity;

@@ -25,8 +25,12 @@ export function useGraphSystem() {
     const sleep = (ms: number) =>
         new Promise((resolve) => setTimeout(resolve, ms));
 
-    function getClosestNodes(target: [number, number], limit = 5): number[] {
-        const radius = 0.02;
+    function getClosestNodes(
+        target: [number, number],
+        limit = 5,
+        radiusDeg = 0.02
+    ): number[] {
+        const radius = radiusDeg;
 
         const candidates = nodeTree.search({
             minX: target[0] - radius,

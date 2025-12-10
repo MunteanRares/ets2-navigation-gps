@@ -47,7 +47,8 @@ export function useRouting() {
         possibleEnds: Set<number | undefined>,
         startHeading: number | null,
         adjacency: Map<number, { to: number; weight: number; r: number }[]>,
-        nodeCoords: Map<number, [number, number]>
+        nodeCoords: Map<number, [number, number]>,
+        startType: "road" | "yard" = "road"
     ): { path: [number, number][]; endId: number } | null => {
         const costs = new Map<number, number>();
         const previous = new Map<number, number>();
@@ -100,10 +101,14 @@ export function useRouting() {
 
                 if (currentCoord && neighborCoord) {
                     if (currentId === start && startHeading !== null) {
-                        const dir = getBearing(currentCoord, neighborCoord);
-                        const diff = getAngleDiff(startHeading, dir);
-                        if (diff > 90) stepCost += 10_000_000;
-                        else if (diff > 45) stepCost += 1000;
+                        if (startType === "yard") {
+                            stepCost += 10;
+                        } else {
+                            const dir = getBearing(currentCoord, neighborCoord);
+                            const diff = getAngleDiff(startHeading, dir);
+                            if (diff > 90) stepCost += 10_000_000;
+                            else if (diff > 45) stepCost += 1000;
+                        }
                     } else if (prevCoord) {
                         const angle = getSignedAngle(
                             prevCoord,
