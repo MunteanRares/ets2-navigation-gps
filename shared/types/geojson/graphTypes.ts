@@ -7,9 +7,8 @@ export interface Node {
 export interface Edge {
     from: number;
     to: number;
-    weight: number;
-    featureId?: string | null;
-    properties?: Record<string, any>;
+    w: number;
+    r: number;
     geometry?: Coord[];
 }
 

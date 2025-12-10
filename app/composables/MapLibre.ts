@@ -1,5 +1,6 @@
 import type { Map as MapLibreGl, StyleSpecification } from "maplibre-gl";
 import { AppSettings } from "../../shared/variables/appSettings";
+import { blendWithBg, lightenColor } from "~/assets/utils/colors";
 
 export async function initializeMap(
     container: HTMLElement
@@ -28,6 +29,8 @@ export async function initializeMap(
             },
         },
 
+        sprite: window.location.origin + "/sprites/sprites",
+
         layers: [
             {
                 id: "background",
@@ -54,8 +57,9 @@ export async function initializeMap(
         zoom: 6,
         minZoom: 5,
         maxZoom: 11.5,
-        maxPitch: 40,
+        maxPitch: 45,
         localIdeographFontFamily: "Quicksand",
+        attributionControl: false,
     });
 
     map.on("load", async () => {
@@ -81,7 +85,7 @@ export async function initializeMap(
             data: "map-data/ets2-villages.geojson",
         });
 
-        // CITI NAMES
+        // CITY NAMES
         map.addSource("ets2-cities", {
             type: "geojson",
             data: "/map-data/ets2-cities.geojson",
@@ -97,6 +101,18 @@ export async function initializeMap(
         map.addSource("country-borders", {
             type: "geojson",
             data: "map-data/ets2-countries.geojson",
+        });
+
+        // SPRITE LOCATIONS
+        map.addSource("sprite-locations", {
+            type: "geojson",
+            data: "map-data/ets2-sprite-locations.geojson",
+        });
+
+        // PREFAB LOCATIONS
+        map.addSource("prefab-locations", {
+            type: "geojson",
+            data: "map-data/ets2-prefabs.geojson",
         });
 
         ////
@@ -217,6 +233,51 @@ export async function initializeMap(
             "ets2-lines"
         );
 
+        // PREFABS FOR SERVICE AREAS     ETC
+        map.addLayer(
+            {
+                id: "prefab-zones",
+                type: "fill",
+                source: "prefab-locations",
+                paint: {
+                    "fill-color": [
+                        "match",
+                        ["get", "color"],
+                        0,
+                        blendWithBg(
+                            lightenColor(AppSettings.theme.defaultColor, 0.3),
+                            0.6
+                        ),
+                        1,
+                        blendWithBg(
+                            lightenColor(AppSettings.theme.defaultColor, 0.3),
+                            0.6
+                        ),
+                        2,
+                        blendWithBg(
+                            lightenColor(AppSettings.theme.defaultColor, 0),
+                            0.6
+                        ),
+                        3,
+                        blendWithBg(
+                            lightenColor(AppSettings.theme.defaultColor, 0.3),
+                            0.6
+                        ),
+                        4,
+                        blendWithBg(
+                            lightenColor(AppSettings.theme.defaultColor, 0.3),
+                            0.6
+                        ),
+                        blendWithBg(
+                            lightenColor(AppSettings.theme.defaultColor, 0.3),
+                            0.6
+                        ),
+                    ],
+                },
+            },
+            "ets2-lines"
+        );
+
         // DISPLAYING BUILDINGS
         map.addLayer(
             {
@@ -280,6 +341,7 @@ export async function initializeMap(
                 "text-halo-width": 0.3,
             },
             minzoom: 5.5,
+            maxzoom: 8,
         });
 
         // DISPLAYING CITY DOTS
@@ -321,6 +383,7 @@ export async function initializeMap(
                 "text-size": 18,
                 "text-font": ["Quicksand"],
                 "text-anchor": "bottom",
+                "text-allow-overlap": true,
                 "text-offset": [0, -0.3],
             },
             paint: {
@@ -329,6 +392,7 @@ export async function initializeMap(
                 "text-halo-width": 0.5,
             },
             minzoom: 5,
+            maxzoom: 8,
         });
 
         // DISPLAYING CAPITAL DOTS
@@ -337,6 +401,7 @@ export async function initializeMap(
             type: "circle",
             source: "ets2-cities",
             minzoom: 5,
+            maxzoom: 8,
             filter: ["==", ["get", "capital"], 2], // Only Capitals
             paint: {
                 "circle-color": appTheme.defaultColor,
@@ -356,20 +421,377 @@ export async function initializeMap(
         });
 
         // DISPLAYING COUNTRY DELIMITATIONS
+        map.addLayer(
+            {
+                id: "country-borders",
+                type: "line",
+                source: "country-borders",
+                paint: {
+                    "line-color": "#3d546e",
+                    "line-width": 2.5,
+                    "line-opacity": 0.4,
+                },
+            },
+            "ets2-lines"
+        );
+
+        // DISPLAY ROAD NUMBERS ON MAP
         map.addLayer({
-            id: "country-borders",
-            type: "line",
-            source: "country-borders",
+            id: "sprite-locations",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["==", ["get", "poiType"], "road"],
+            minzoom: 6.5,
+
+            layout: {
+                "icon-image": ["get", "sprite"],
+
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    6.5,
+                    0.8,
+                    //
+                    10,
+                    1,
+                    //
+                    11.2,
+                    1.3,
+                ],
+
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY GAS ICONS ON MAP
+        map.addLayer({
+            id: "gas-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "sprite"], ["gas_ico"], true, false],
+            minzoom: 6.5,
+            layout: {
+                "icon-image": ["get", "sprite"],
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY TRAIN ICONS ON MAP
+        map.addLayer({
+            id: "train-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "poiType"], ["train"], true, false],
+            minzoom: 6.5,
+            layout: {
+                "icon-image": ["get", "sprite"],
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY FERRY ICONS ON MAP
+        map.addLayer({
+            id: "ferry-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "poiType"], ["ferry"], true, false],
+            minzoom: 6.5,
+            layout: {
+                "icon-image": ["get", "sprite"],
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY ROADWORK ICONS ON MAP
+        map.addLayer({
+            id: "roadwork-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "sprite"], ["roadwork"], true, false],
+            minzoom: 6.5,
+            layout: {
+                "icon-image": ["get", "sprite"],
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    0.7,
+                    //
+                    9.5,
+                    0.9,
+                ],
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY RAILCROSSING ICONS ON MAP
+        map.addLayer({
+            id: "raiolcrossing-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "sprite"], ["railcrossing"], true, false],
+            minzoom: 6.5,
+            layout: {
+                "icon-image": ["get", "sprite"],
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    0.7,
+                    //
+                    9.5,
+                    0.9,
+                ],
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY TOLL ICONS ON MAP
+        map.addLayer({
+            id: "toll-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "sprite"], ["toll_ico"], true, false],
+            minzoom: 6.5,
+
+            layout: {
+                "icon-image": ["get", "sprite"],
+
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "icon-allow-overlap": true,
+                "icon-ignore-placement": true,
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY PARKING ON MAP
+        map.addLayer(
+            {
+                id: "parking-icons",
+                type: "symbol",
+                source: "sprite-locations",
+                filter: [
+                    "match",
+                    ["get", "sprite"],
+                    ["parking_ico"],
+                    true,
+                    false,
+                ],
+                minzoom: 8,
+                layout: {
+                    "icon-image": ["get", "sprite"],
+                    "icon-size": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        8,
+                        1.4,
+                        //
+                        9.5,
+                        1.8,
+                    ],
+                    "symbol-placement": "point",
+                },
+            },
+            "gas-icons"
+        );
+
+        // DISPLAY SERVICE LOCATIONS ON MAP
+        map.addLayer({
+            id: "service-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "sprite"], ["service_ico"], true, false],
+            minzoom: 8,
+
+            layout: {
+                "icon-image": ["get", "sprite"],
+
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "icon-allow-overlap": true,
+                "icon-ignore-placement": true,
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY PHOTO SIGHT LOCATIONS ON MAP
+        map.addLayer({
+            id: "photo-sight-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: [
+                "match",
+                ["get", "sprite"],
+                ["photo_sight_captured"],
+                true,
+                false,
+            ],
+            minzoom: 6.5,
+
+            layout: {
+                "icon-image": ["get", "sprite"],
+
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "symbol-placement": "point",
+
+                "text-field": ["get", "poiName"],
+                "text-font": ["Quicksand"],
+                "text-size": 13,
+
+                "text-offset": [0, 0.8],
+                "text-anchor": "top",
+
+                "text-optional": true,
+            },
             paint: {
-                "line-color": "#3d546e",
-                "line-width": 5,
-                "line-blur": 2,
-                "line-opacity": 0.4,
+                "text-color": "#ffffff",
+
+                "text-opacity": ["step", ["zoom"], 0, 9, 1],
+            },
+        });
+
+        // DISPLAY VIEWPOINT ON MAP
+        map.addLayer({
+            id: "viewpoint-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "sprite"], ["viewpoint"], true, false],
+            minzoom: 6.5,
+            layout: {
+                "icon-image": ["get", "sprite"],
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "symbol-placement": "point",
+            },
+        });
+
+        // DISPLAY FACILITES ON MAP
+        map.addLayer(
+            {
+                id: "facility-icons",
+                type: "symbol",
+                source: "sprite-locations",
+                filter: [
+                    "all",
+                    ["match", ["get", "poiType"], ["facility"], true, false],
+                    ["!=", ["get", "sprite"], "parking_ico"],
+                    ["!=", ["get", "sprite"], "gas_ico"],
+                    ["!=", ["get", "sprite"], "service_ico"],
+                ],
+                minzoom: 8,
+                layout: {
+                    "icon-image": ["get", "sprite"],
+                    "icon-size": [
+                        "interpolate",
+                        ["linear"],
+                        ["zoom"],
+                        7.5,
+                        1.2,
+                        //
+                        10,
+                        1.8,
+                    ],
+                    "icon-allow-overlap": true,
+                    "symbol-placement": "point",
+                },
+            },
+            "gas-icons"
+        );
+
+        // DISPLAY COMPANIES LOCATIONS ON MAP
+        map.addLayer({
+            id: "companies-icons",
+            type: "symbol",
+            source: "sprite-locations",
+            filter: ["match", ["get", "poiType"], ["company"], true, false],
+            minzoom: 8,
+
+            layout: {
+                "icon-image": ["get", "sprite"],
+
+                "icon-size": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    8,
+                    1.4,
+                    //
+                    9.5,
+                    1.8,
+                ],
+                "symbol-placement": "point",
             },
         });
 
         map.addControl(new maplibregl.NavigationControl());
-        map.addControl(new maplibregl.FullscreenControl());
     });
 
     return map;

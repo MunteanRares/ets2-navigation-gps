@@ -1,395 +1,485 @@
 <script lang="ts" setup>
-import { ref, onMounted, shallowRef } from "vue";
+import { ref, onMounted, shallowRef, Transition } from "vue";
 import "maplibre-gl/dist/maplibre-gl.css";
-import maplibregl from "maplibre-gl"; // Ensure this is imported for Types/Markers
-import { haversine } from "~/assets/utils/helpers";
-import { loadGraph } from "~/assets/utils/clientGraph";
-import RBush from "rbush";
+import maplibregl from "maplibre-gl";
 import { AppSettings } from "~~/shared/variables/appSettings";
-import { distance, lineString, point, simplify } from "@turf/turf";
+import {
+    lineSlice,
+    lineString,
+    nearestPointOnLine,
+    point,
+    simplify,
+    length,
+    distance,
+} from "@turf/turf";
 import { darkenColor, lightenColor } from "~/assets/utils/colors";
+import { getAngleDiff, getBearing } from "~/assets/utils/geographicMath";
+import { convertTelemtryTime } from "~/assets/utils/helpers";
 
-//// INTERFACE FOR RBUSH
-interface NodeIndexItem {
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    id: number;
-    coord: [number, number];
-}
-
-const loading = ref(false);
+// MAP STATE
 const mapEl = ref<HTMLElement | null>(null);
+const wrapperEl = ref<HTMLElement | null>(null);
 const map = shallowRef<maplibregl.Map | null>(null);
+const destinationName = ref<string>("");
+const routeDistance = ref<string>("");
+const routeEta = ref<string>("");
 
-// TRUCK DATA
+// UI STATE
+const isSheetExpanded = ref(false);
+
+// NAVIGATION STATE
+const isNavigating = ref(false);
+const isCameraLocked = ref(false);
+const currentRoutePath = shallowRef<[number, number][] | null>(null);
+const lastMathPos = ref<[number, number] | null>(null);
+
+// GAME STATE
+// const stringTime = ref<string>("");
+
+// TRUCK STATE
 const truckMarker = shallowRef<maplibregl.Marker | null>(null);
 const truckEl = ref<HTMLElement | null>(null);
-const truckHeading = ref(0);
+// const truckHeading = ref(0);
 
 //// ROUTING STATE
 const startNodeId = ref<number | null>(null);
 const endNodeId = ref<number | null>(null);
 const endMarker = ref<maplibregl.Marker | null>(null);
 
-//// We use this to find noted in a specific area
-const nodeTree = new RBush<NodeIndexItem>();
+//// COMPOSABLES
+const {
+    startTelemetry,
+    gameTime,
+    gameConnected,
+    truckCoords,
+    truckSpeed,
+    speedLimit,
+    truckHeading,
+    fuel,
+    restStoptime,
+    restStopMinutes,
+} = useEtsTelemetry();
 
-//// GRAPH DATA
-const adjacency = new Map<
-    number,
-    { to: number; weight: number; roadType: string }[]
->();
-const nodeCoords = new Map<number, [number, number]>();
+const { loadLocationData, getGameLocationName, calculateGameRouteDetails } =
+    useCityData();
 
-const { startTelemetry } = useEtsTelemetry();
+const {
+    loading,
+    progress,
+    adjacency,
+    nodeCoords,
+    getClosestNodes,
+    initializeGraphData,
+} = useGraphSystem();
+
+const { calculateRoute, mergeClosePoints } = useRouting();
+
+watch([loading, gameConnected], ([isLoading, isGameConnected]) => {
+    if (!isLoading) {
+        setTimeout(() => {
+            centerTruck();
+        }, 100);
+
+        if (isGameConnected) {
+            setupTruckMarker();
+            setTimeout(() => {
+                centerTruck();
+            }, 500);
+        } else {
+            truckMarker.value?.remove();
+            truckMarker.value = null;
+        }
+    }
+});
 
 onMounted(async () => {
+    await loadLocationData();
+
     if (!mapEl.value) return;
 
     try {
         map.value = await initializeMap(mapEl.value);
         if (!map.value) return;
 
-        map.value.on("load", visualizeGraph);
+        map.value.addControl(
+            new maplibregl.FullscreenControl({
+                container: wrapperEl.value!,
+            })
+        );
+
+        map.value.on("load", async () => {
+            await initializeGraphData();
+            setupRouteLayer();
+        });
+
         map.value.on("click", handleMapClick);
 
-        if (truckEl.value) {
-            truckMarker.value = new maplibregl.Marker({
-                element: truckEl.value,
-                anchor: "center",
-                rotationAlignment: "map",
-                pitchAlignment: "map",
-            })
-                .setLngLat([0, 0])
-                .addTo(map.value!);
-        }
+        breakLockEvent();
 
-        startTelemetry((coords, heading) => {
-            if (!truckMarker.value) return;
-
-            truckMarker.value.setLngLat(coords);
-            truckMarker.value.setRotation(heading);
-            truckHeading.value = heading;
-
-            if (adjacency.size === 0 || nodeTree.all().length === 0) return;
-            const closestNodes = getClosestNodes(coords, 1);
-
-            if (closestNodes.length > 0) {
-                startNodeId.value = closestNodes[0]!;
-            }
+        startTelemetry(() => {
+            updateTruckPosition(truckCoords.value!, truckHeading.value);
         });
     } catch (e) {
         console.error(e);
     }
 });
 
-//// HANDLE CLICKS
+function updateTruckPosition(coords: [number, number], heading: number) {
+    if (!truckMarker.value) return;
+
+    truckMarker.value.setLngLat(coords);
+    truckMarker.value.setRotation(heading);
+    truckHeading.value = heading;
+
+    if (endNodeId.value !== null) {
+        let shouldUpdateMath = false;
+
+        if (!lastMathPos.value) {
+            shouldUpdateMath = true;
+        } else {
+            const distFromLastCalc = distance(
+                point(lastMathPos.value),
+                point(coords),
+                { units: "kilometers" }
+            );
+
+            if (distFromLastCalc > 0.01) {
+                shouldUpdateMath = true;
+            }
+        }
+
+        if (shouldUpdateMath) {
+            updateRouteProgress(coords);
+            lastMathPos.value = coords;
+        }
+    }
+
+    if (isCameraLocked.value && map.value) {
+        const currentZoom = map.value.getZoom();
+        const currentPitch = map.value.getPitch();
+
+        map.value.easeTo({
+            center: coords,
+            bearing: isNavigating.value ? heading : 0,
+            pitch: currentPitch,
+            zoom: currentZoom,
+            duration: 300,
+            easing: (t) => t,
+        });
+    }
+}
+
+function breakLockEvent() {
+    const breakLockEvents = [
+        "dragstart",
+        "touchstart",
+        "wheel",
+        "pitchstart",
+        "boxzoomstart",
+    ];
+
+    breakLockEvents.forEach((event) => {
+        map.value?.on(event, () => {
+            if (isCameraLocked.value) {
+                isCameraLocked.value = false;
+            }
+        });
+    });
+}
+
 function handleMapClick(e: maplibregl.MapMouseEvent) {
-    if (adjacency.size === 0) return;
+    if (adjacency.size === 0 || !truckMarker.value) return;
 
-    const clickedCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
-    console.log(clickedCoords);
+    const truckPos = truckMarker.value.getLngLat();
+    const truckCoords: [number, number] = [truckPos.lng, truckPos.lat];
 
-    const candidates = getClosestNodes(clickedCoords, 5);
+    const startConfig = findBestStartConfiguration(
+        truckCoords,
+        truckHeading.value
+    );
 
-    if (candidates.length === null) {
-        console.warn("No nodes found.");
+    if (!startConfig) {
+        console.warn("Could not find a valid road matching truck heading.");
         return;
     }
 
-    if (startNodeId.value === null) {
-        const nodeId = candidates[0]!;
-        startNodeId.value = nodeId;
-    } else {
-        const candidateSet = new Set(candidates);
+    startNodeId.value = startConfig.toId;
 
-        if (endMarker.value) endMarker.value.remove();
+    const clickedCoords: [number, number] = [e.lngLat.lng, e.lngLat.lat];
+    console.log(clickedCoords);
+    const clickPt = point(clickedCoords);
+    const endCandidates = getClosestNodes(clickedCoords, 10);
 
-        const result = calculateRoute(
-            startNodeId.value,
-            candidateSet,
-            truckHeading.value
-        );
+    if (endCandidates.length === 0) return;
 
-        if (result) {
-            endNodeId.value = result.endId;
-            const endLoc = nodeCoords.get(result.endId);
+    let bestEndNode = endCandidates[0];
+    let minEndDist = Infinity;
 
-            const marker = new maplibregl.Marker({
-                color: AppSettings.theme.defaultColor,
-            })
-                .setLngLat(endLoc as [number, number])
-                .addTo(map.value!);
-
-            endMarker.value = marker;
-            const markerEl = marker.getElement();
-
-            markerEl.style.cursor = "pointer";
-            markerEl.classList.add("my-custom-marker");
-
-            markerEl.addEventListener("click", (ev) => {
-                ev.stopPropagation();
-                clearRouteState();
-            });
-
-            drawRoute(result.path);
-        } else {
-            console.warn("Could not find a path to any nearby node");
+    for (const nodeId of endCandidates) {
+        const nPos = nodeCoords.get(nodeId);
+        const neighbors = adjacency.get(nodeId);
+        if (!nPos || !neighbors) continue;
+        for (const edge of neighbors) {
+            const neighPos = nodeCoords.get(edge.to);
+            if (!neighPos) continue;
+            const line = lineString([nPos, neighPos]);
+            const snap = nearestPointOnLine(line, clickPt);
+            if (
+                snap.properties.dist !== undefined &&
+                snap.properties.dist < minEndDist
+            ) {
+                minEndDist = snap.properties.dist;
+                const d1 = distance(clickPt, point(nPos));
+                const d2 = distance(clickPt, point(neighPos));
+                bestEndNode = d1 < d2 ? nodeId : edge.to;
+            }
         }
+    }
+
+    if (endMarker.value) endMarker.value.remove();
+
+    const result = calculateRoute(
+        startNodeId.value,
+        new Set([bestEndNode]),
+        truckHeading.value,
+        adjacency,
+        nodeCoords
+    );
+
+    if (result) {
+        isSheetExpanded.value = false;
+        endNodeId.value = result.endId;
+
+        const stitchedPath = [startConfig.projectedCoords, ...result.path];
+        currentRoutePath.value = stitchedPath;
+
+        drawRouteOnMap(stitchedPath);
+        addDestinationMarker(result.endId);
+
+        // Update stats
+        const details = calculateGameRouteDetails(stitchedPath);
+        routeDistance.value = `${details.km} km`;
+        routeEta.value = details.time;
+        destinationName.value = getGameLocationName(e.lngLat.lng, e.lngLat.lat);
     }
 }
 
-function getClosestNodes(target: [number, number], limit = 5): number[] {
-    const radius = 0.3;
+function startNavigation() {
+    if (!truckMarker.value || !map.value) return;
 
-    const candidates = nodeTree.search({
-        minX: target[0] - radius,
-        minY: target[1] - radius,
-        maxX: target[0] + radius,
-        maxY: target[1] + radius,
+    isNavigating.value = true;
+    isSheetExpanded.value = false;
+
+    map.value.jumpTo({
+        center: truckMarker.value.getLngLat(),
+        zoom: 10,
+        pitch: 45,
+        bearing: truckHeading.value,
     });
 
-    const sorted = candidates
-        .map((item) => ({
-            id: item.id,
-            dist: haversine(target, item.coord),
-        }))
-        .sort((a, b) => a.dist - b.dist); // Closest first
-
-    return sorted.slice(0, limit).map((c) => c.id);
+    isCameraLocked.value = true;
 }
 
-//// CALCULATIONS FOR DIJKSTRA ALGORITHM
-function toRad(deg: number) {
-    return (deg * Math.PI) / 180;
-}
-
-function toDeg(rad: number) {
-    return (rad * 180) / Math.PI;
-}
-
-function getBearing(start: [number, number], end: [number, number]) {
-    const startLat = toRad(start[1]);
-    const startLng = toRad(start[0]);
-    const endLat = toRad(end[1]);
-    const endLng = toRad(end[0]);
-    const y = Math.sin(endLng - startLng) * Math.cos(endLat);
-    const x =
-        Math.cos(startLat) * Math.sin(endLat) -
-        Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
-    const brng = toDeg(Math.atan2(y, x));
-    return (brng + 360) % 360;
-}
-
-function getSignedAngle(
-    p1: [number, number],
-    p2: [number, number],
-    p3: [number, number]
+function findBestStartConfiguration(
+    truckCoords: [number, number],
+    truckHeading: number,
+    searchRadius: number = 5
 ) {
-    const b1 = getBearing(p1, p2);
-    const b2 = getBearing(p2, p3);
-    let diff = b2 - b1;
-    while (diff <= -180) diff += 360;
-    while (diff > 180) diff -= 360;
-    return diff;
-}
+    const truckPt = point(truckCoords);
 
-function getAngleDiff(angle1: number, angle2: number) {
-    let diff = Math.abs(angle1 - angle2);
-    if (diff > 180) diff = 360 - diff;
-    return diff;
-}
+    const roadCandidates = getClosestNodes(truckCoords, searchRadius);
+    let bestRoadEdge = null;
+    let minRoadDist = Infinity;
 
-//// DIJKSTRA ALGORITHM + COST
-function calculateRoute(
-    start: number,
-    possibleEnds: Set<number>,
-    startHeading: number | null = null
-): { path: [number, number][]; endId: number } | null {
-    const costs = new Map<number, number>();
-    const previous = new Map<number, number>();
-    const pq = new Set<number>();
-
-    costs.set(start, 0);
-    pq.add(start);
-
-    let foundEndId: number | null = null;
-
-    while (pq.size > 0) {
-        let currentId: number | null = null;
-        let lowestCost = Infinity;
-
-        for (const id of pq) {
-            const c = costs.get(id) ?? Infinity;
-            if (c < lowestCost) {
-                lowestCost = c;
-                currentId = id;
-            }
-        }
-
-        if (currentId === null) break;
-        if (possibleEnds.has(currentId)) {
-            foundEndId = currentId;
-            break;
-        }
-
-        pq.delete(currentId);
-
-        const neighbors = adjacency.get(currentId) || [];
-        const currentCoord = nodeCoords.get(currentId);
-        const prevId = previous.get(currentId);
-        const prevCoord = prevId !== undefined ? nodeCoords.get(prevId) : null;
+    for (const nodeId of roadCandidates) {
+        const neighbors = adjacency.get(nodeId);
+        const nodePos = nodeCoords.get(nodeId);
+        if (!neighbors || !nodePos) continue;
 
         for (const edge of neighbors) {
-            const neighborId = edge.to;
+            const neighborPos = nodeCoords.get(edge.to);
+            if (!neighborPos) continue;
 
-            let stepCost = edge.weight || 1;
-            const neighborCoord = nodeCoords.get(neighborId);
+            const roadBearing = getBearing(nodePos, neighborPos);
+            const angleDiff = getAngleDiff(truckHeading, roadBearing);
+            if (angleDiff > 90) continue;
 
-            if (currentCoord && neighborCoord) {
-                if (currentId === start && startHeading !== null) {
-                    const directionToNeighbor = getBearing(
-                        currentCoord,
-                        neighborCoord
-                    );
-                    const angleDiff = getAngleDiff(
-                        startHeading,
-                        directionToNeighbor
-                    );
+            const roadLine = lineString([nodePos, neighborPos]);
+            const snapped = nearestPointOnLine(roadLine, truckPt);
+            const dist = snapped.properties.dist; // km
 
-                    if (angleDiff > 90) {
-                        stepCost += 1000000;
-                    } else if (angleDiff > 45) {
-                        stepCost += 1000;
-                    }
-                } else if (prevCoord) {
-                    const angle = getSignedAngle(
-                        prevCoord,
-                        currentCoord,
-                        neighborCoord
-                    );
-                    const absAngle = Math.abs(angle);
-
-                    //// 1.MANUAL ROUNDABOUT
-                    if (edge.roadType === "roundabout") {
-                        stepCost *= 0.5;
-
-                        if (angle < -100) {
-                            stepCost += 10000;
-                        }
-                    }
-
-                    //// 2. GLOBAL SAFETY
-                    if (absAngle > 115) {
-                        stepCost += 1000000.0;
-                    }
-
-                    //// 3. WRONG WAY SHORTCUTS
-                    else if (angle < -100) {
-                        stepCost += 1000.0;
-                    }
-
-                    //// 4. HIGHWAY FLOW
-                    else if (absAngle < 20) {
-                        stepCost *= 0.9;
-                    }
-
-                    //// 5. STANDARD TURNS
-                    else {
-                        stepCost += 0.05;
-                    }
-                }
-            }
-
-            if (stepCost < 1) stepCost = 1;
-            const newTotalCost = lowestCost + stepCost;
-            const oldCost = costs.get(neighborId) ?? Infinity;
-
-            if (newTotalCost < oldCost) {
-                costs.set(neighborId, newTotalCost);
-                previous.set(neighborId, currentId);
-                pq.add(neighborId);
+            if (dist !== undefined && dist < 0.02 && dist < minRoadDist) {
+                minRoadDist = dist;
+                bestRoadEdge = {
+                    type: "road",
+                    fromId: nodeId,
+                    toId: edge.to,
+                    projectedCoords: snapped.geometry.coordinates as [
+                        number,
+                        number
+                    ],
+                };
             }
         }
     }
 
-    if (
-        foundEndId === null ||
-        (!previous.has(foundEndId) && start !== foundEndId)
-    )
-        return null;
+    if (bestRoadEdge) return bestRoadEdge;
 
-    const path: [number, number][] = [];
+    const yardCandidates = getClosestNodes(truckCoords, 200);
 
-    let curr: number | undefined = foundEndId;
+    if (yardCandidates.length === 0) return null;
 
-    while (curr !== undefined) {
-        const coord = nodeCoords.get(curr);
-        if (coord) path.unshift(coord);
-        curr = previous.get(curr);
-    }
+    let closestNodeId: number | null = null;
+    let minNodeDist = Infinity;
 
-    return { path, endId: foundEndId };
-}
+    for (const nodeId of yardCandidates) {
+        const nodePos = nodeCoords.get(nodeId);
+        if (!nodePos) continue;
 
-// REMOVING ZIG ZAG LINES
-function mergeClosePoints(
-    coords: [number, number][],
-    minDistanceMeters: number = 5
-): [number, number][] {
-    if (coords.length < 2) return coords;
+        const dist = distance(truckPt, point(nodePos));
 
-    const result: [number, number][] = [];
-    let i = 0;
-
-    while (i < coords.length) {
-        const current = coords[i]!;
-        if (i === coords.length - 1) {
-            result.push(current);
-            break;
-        }
-
-        const next = coords[i + 1]!;
-
-        const dist = distance(point(current), point(next), { units: "meters" });
-
-        if (dist < minDistanceMeters) {
-            const midPoint: [number, number] = [
-                (current[0] + next[0]) / 2,
-                (current[1] + next[1]) / 2,
-            ];
-            result.push(midPoint);
-
-            i += 2;
-        } else {
-            result.push(current);
-            i++;
+        if (dist < minNodeDist) {
+            minNodeDist = dist;
+            closestNodeId = nodeId;
         }
     }
 
-    if (result.length < 2) {
-        result.push(coords[coords.length - 1]!);
+    if (closestNodeId !== null) {
+        const nodePos = nodeCoords.get(closestNodeId)!;
+        return {
+            type: "yard",
+            fromId: closestNodeId,
+            toId: closestNodeId,
+            projectedCoords: nodePos,
+        };
     }
 
-    return result;
+    return null;
 }
 
-//// DRAWING THE ROUTE
-function drawRoute(coords: [number, number][]) {
+const updateRouteProgress = (truckCoords: [number, number]) => {
+    if (!currentRoutePath.value || currentRoutePath.value.length < 2) return;
+
+    try {
+        const routeLine = lineString(currentRoutePath.value);
+        const truckPt = point(truckCoords);
+
+        const snapped = nearestPointOnLine(routeLine, truckPt);
+        const lastPointIndex = currentRoutePath.value.length - 1;
+        const remainingSection = lineSlice(
+            snapped,
+            point(currentRoutePath.value[lastPointIndex]!),
+            routeLine
+        );
+
+        const distKm = length(remainingSection, { units: "kilometers" });
+
+        if (distKm < 1) {
+            clearRouteState();
+
+            map.value!.easeTo({
+                center: truckCoords,
+                bearing: 0,
+                pitch: 0,
+                zoom: map.value?.getZoom(),
+                duration: 300,
+                easing: (t) => t,
+            });
+        }
+
+        routeDistance.value = `${distKm.toFixed(0)} km`;
+
+        const hours = distKm / 70;
+        const mins = Math.round(hours * 60);
+        routeEta.value = `${Math.floor(mins / 60)}h ${mins % 60}m`;
+    } catch (e) {}
+};
+
+const centerTruck = () => {
+    if (!truckMarker.value) return;
+    isCameraLocked.value = true;
+};
+
+function clearRouteState() {
     if (!map.value) return;
+    const source = map.value.getSource(
+        "debug-route"
+    ) as maplibregl.GeoJSONSource;
 
-    let cleanCoords = mergeClosePoints(coords, 600);
+    if (source) {
+        source.setData({ type: "FeatureCollection", features: [] });
+    }
 
+    if (endMarker.value) {
+        endMarker.value.remove();
+        endMarker.value = null;
+    }
+
+    endNodeId.value = null;
+    isSheetExpanded.value = false;
+
+    isNavigating.value = false;
+    isCameraLocked.value = false;
+}
+
+function setupRouteLayer() {
+    if (!map.value) return;
+    if (map.value.getSource("debug-route")) return;
+
+    map.value.addSource("debug-route", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+    });
+
+    map.value.addLayer(
+        {
+            id: "debug-route-line",
+            type: "line",
+            source: "debug-route",
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: {
+                "line-color": "#22d3ee",
+                "line-width": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    10,
+                    8,
+                    10.2,
+                    9,
+                    10.5,
+                    12,
+                    11.5,
+                    19.5,
+                ],
+            },
+        },
+        "sprite-locations"
+    );
+}
+
+function setupTruckMarker() {
+    if (truckEl.value && map.value) {
+        truckMarker.value = new maplibregl.Marker({
+            element: truckEl.value,
+            anchor: "center",
+            rotationAlignment: "map",
+            pitchAlignment: "map",
+        })
+            .setLngLat([0, 0])
+            .addTo(map.value);
+    }
+}
+
+function drawRouteOnMap(coords: [number, number][]) {
+    if (!map.value) return;
+    let cleanCoords = mergeClosePoints(coords, 300);
     const line = lineString(cleanCoords);
-
     const simplifiedLine = simplify(line, {
         tolerance: 0.0005,
         highQuality: true,
     });
 
-    // STEP 4: Draw
     const source = map.value.getSource(
         "debug-route"
     ) as maplibregl.GeoJSONSource;
@@ -407,232 +497,255 @@ function drawRoute(coords: [number, number][]) {
     }
 }
 
-//// CLEARS CURRENT ROUTE ON CLICKING AFTER SUCCESSFUL ROUTE
-function clearRouteLayer() {
-    if (!map.value) return;
-    const source = map.value.getSource(
-        "debug-route"
-    ) as maplibregl.GeoJSONSource;
-    if (source) {
-        source.setData({ type: "FeatureCollection", features: [] });
-    }
+function addDestinationMarker(nodeId: number) {
+    const endLocation = nodeCoords.get(nodeId);
+    if (!endLocation || !map.value) return;
+
+    const marker = new maplibregl.Marker({
+        color: AppSettings.theme.defaultColor,
+    })
+        .setLngLat(endLocation)
+        .addTo(map.value);
+
+    endMarker.value = marker;
+    const markerEl = marker.getElement();
+
+    markerEl.style.cursor = "pointer";
+    markerEl.classList.add("my-custom-marker");
+
+    markerEl.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        clearRouteState();
+    });
 }
 
-function clearRouteState() {
-    clearRouteLayer();
-    if (endMarker.value) {
-        endMarker.value.remove();
-        endMarker.value = null;
-    }
-    endNodeId.value = null;
-}
-
-//// NODE INDEX FOR BBOX RBUSH TREE (fasteer search)
-function buildNodeIndex(nodes: { id: number; lng: number; lat: number }[]) {
-    const items: NodeIndexItem[] = nodes.map((n) => ({
-        minX: n.lng,
-        minY: n.lat,
-        maxX: n.lng,
-        maxY: n.lat,
-        id: n.id,
-        coord: [n.lng, n.lat],
-    }));
-
-    nodeTree.load(items);
-}
-
-//// LOADING GRAPH (or visualizing)
-async function visualizeGraph() {
-    if (!map.value) return;
-    loading.value = true;
-
-    try {
-        //// BUILD NODES
-        const { nodes, edges } = await loadGraph();
-        adjacency.clear();
-        nodeCoords.clear();
-
-        const spatialIndex = new Map<string, number>();
-        const idRedirect = new Map<number, number>();
-        const uniqueNodes: any[] = [];
-
-        for (const node of nodes) {
-            const key = `${node.lat.toFixed(5)},${node.lng.toFixed(5)}`;
-
-            if (spatialIndex.has(key)) {
-                const masterId = spatialIndex.get(key)!;
-                idRedirect.set(node.id, masterId);
-            } else {
-                spatialIndex.set(key, node.id);
-                idRedirect.set(node.id, node.id);
-                nodeCoords.set(node.id, [node.lng, node.lat]);
-                adjacency.set(node.id, []);
-                uniqueNodes.push(node);
-            }
-        }
-
-        //// CREATING BBOX FOR NODES (FASTER SEARCH) : nodeTree<RBush>
-        buildNodeIndex(uniqueNodes);
-
-        //// BUILD EDGES
-        let connectedCount = 0;
-        const edgeFeatures: any[] = [];
-        for (const edge of edges) {
-            const from = idRedirect.get(edge.from);
-            const to = idRedirect.get(edge.to);
-
-            if (from === undefined || to === undefined || from === to) continue;
-
-            const start = nodeCoords.get(from);
-            const end = nodeCoords.get(to);
-
-            if (start && end) {
-                const rType = edge.properties?.roadType || "local";
-                adjacency
-                    .get(from)
-                    ?.push({ to: to, weight: edge.weight, roadType: rType });
-                connectedCount++;
-
-                // UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
-                // edgeFeatures.push({
-                //     type: "Feature",
-                //     geometry: { type: "LineString", coordinates: [start, end] },
-                //     properties: {
-                //         weight: edge.weight,
-                //         color:
-                //             edge.properties?.roadType === "freeway"
-                //                 ? "#ff00ff"
-                //                 : "#00ff00",
-                //     },
-                // });
-            }
-        }
-
-        if (!map.value.getSource("debug-route")) {
-            map.value.addSource("debug-route", {
-                type: "geojson",
-                data: { type: "FeatureCollection", features: [] },
-            });
-            map.value.addLayer({
-                id: "debug-route-line",
-                type: "line",
-                source: "debug-route",
-                layout: { "line-join": "round", "line-cap": "round" },
-                paint: {
-                    "line-color": "#22d3ee",
-                    "line-width": [
-                        "interpolate",
-                        ["linear"],
-                        ["zoom"],
-                        //
-                        10,
-                        8,
-                        //
-                        10.2,
-                        9,
-                        //
-                        10.5,
-                        12,
-                        //
-                        11.5,
-                        19.5,
-                        //
-                    ],
-                },
-            });
-        }
-
-        //// UNCOMMENT THIS ONLY WHEN DEBUGGING EDGES.
-        // if (!map.value.getSource("debug-edges")) {
-        //     map.value.addSource("debug-edges", {
-        //         type: "geojson",
-        //         data: { type: "FeatureCollection", features: edgeFeatures },
-        //     });
-        //     map.value.addLayer({
-        //         id: "debug-edges-lines",
-        //         type: "line",
-        //         source: "debug-edges",
-        //         layout: { "line-join": "round", "line-cap": "round" },
-        //         paint: {
-        //             "line-color": ["get", "color"],
-        //             "line-width": 1.5,
-        //             "line-opacity": 0.4,
-        //         },
-        //     });
-        // }
-
-        loading.value = false;
-    } catch (err) {
-        console.error("Error loading graph:", err);
-    }
+function toggleSheet() {
+    isSheetExpanded.value = !isSheetExpanded.value;
 }
 </script>
 
 <template>
-    <div ref="mapEl" class="map-container"></div>
-    <!-- <div v-else>LODING</div> -->
-    <button class="bottom-btn btn" v-on:click.prevent="clearRouteState">
-        Reset Navigation
-    </button>
+    <div ref="wrapperEl" class="full-page-wrapper">
+        <div ref="mapEl" class="map-container"></div>
 
-    <div style="display: none">
-        <div ref="truckEl" class="truck-marker">
-            <svg
-                width="48"
-                height="48"
-                viewBox="0 0 100 100"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-                style="
-                    display: block;
-                    filter: drop-shadow(0px 6px 8px rgba(0, 0, 0, 0.3));
-                "
-            >
-                <defs>
-                    <linearGradient
-                        id="two-tone"
-                        x1="0%"
-                        y1="0%"
-                        x2="100%"
-                        y2="0%"
-                    >
-                        <stop
-                            offset="50%"
-                            :stop-color="
-                                darkenColor(AppSettings.theme.defaultColor, 0.1)
-                            "
-                        />
-                        <stop
-                            offset="50%"
-                            :stop-color="
-                                lightenColor(
-                                    AppSettings.theme.defaultColor,
-                                    0.23
-                                )
-                            "
-                        />
-                    </linearGradient>
-                </defs>
+        <div class="game-information">
+            <div class="truck-info">
+                <div class="truck-speed-div">
+                    <div class="road-perspective"></div>
+                    <p class="truck-speed">{{ truckSpeed }}</p>
+                    <p class="km-h">km/h</p>
+                </div>
+            </div>
 
-                <!-- 
-                    The Shape:
-                    1. fill="url(#two-tone)": Applies the split color.
-                    2. stroke="url(#two-tone)": Applies the color to the edges too.
-                    3. stroke-width="10": THICKNESS determines ROUNDNESS.
-                    4. stroke-linejoin="round": Actually rounds the corners.
-                -->
-                <path
-                    d="M50 10 L90 85 L50 70 L10 85 Z"
-                    fill="url(#two-tone)"
-                    stroke="url(#two-tone)"
-                    stroke-width="12"
-                    stroke-linejoin="round"
-                    paint-order="stroke fill"
+            <div v-if="gameConnected" class="gas-sleep-time">
+                <div class="gas-sleep">
+                    <div class="fuel-amount">
+                        <Icon
+                            name="bi:fuel-pump-fill"
+                            :class="{ 'pulse-red': fuel < 100 }"
+                        />
+                        <p>{{ fuel }}<span class="liters">l</span></p>
+                    </div>
+
+                    <div class="sleep-div">
+                        <Icon
+                            name="solar:moon-sleep-bold"
+                            class="sleep-icon"
+                            :class="{ 'pulse-blue': restStopMinutes < 90 }"
+                        />
+                        <p>{{ restStoptime }}</p>
+                    </div>
+                </div>
+
+                <p class="game-time">{{ gameTime }}</p>
+            </div>
+
+            <div v-else class="disconnected-div">
+                <p class="disconnected-message">Game Offline</p>
+                <Icon
+                    name="streamline-ultimate:link-disconnected-bold"
+                    class="disconnected-icon"
                 />
+            </div>
+        </div>
 
-                <!-- Optional: Subtle white center line if you want it to look more "folded" -->
-                <!-- <path d="M50 10 L50 70" stroke="rgba(255,255,255,0.2)" stroke-width="2" stroke-linecap="round"/> -->
-            </svg>
+        <Transition name="fade">
+            <div v-if="loading" class="loading-screen">
+                <div class="progress-text">{{ progress }}%</div>
+                <div class="progress-bar-bg">
+                    <div
+                        class="progress-bar-fill"
+                        :style="{ width: progress + '%' }"
+                    ></div>
+                </div>
+                <h2>Loading Route Data...</h2>
+            </div>
+        </Transition>
+
+        <button class="option-btn center-btn" @click.prevent="centerTruck">
+            <Icon name="fe:target" size="24" class="target-icon" />
+        </button>
+
+        <Transition name="bottom-circle">
+            <div
+                v-if="speedLimit !== 0 && !endMarker"
+                class="speed-limit-circle speed-limit-circle-bottom"
+            >
+                <Transition name="over-limit">
+                    <div
+                        v-if="truckSpeed > speedLimit"
+                        class="speed-limit-circle-over-limit"
+                    >
+                        <div class="over-limit">{{ truckSpeed }}</div>
+                    </div>
+                </Transition>
+
+                <div class="speed-limit">{{ speedLimit }}</div>
+            </div>
+        </Transition>
+
+        <Transition name="sheet-slide">
+            <div
+                v-if="endMarker"
+                class="bottom-sheet"
+                :class="{ 'is-expanded': isSheetExpanded }"
+                :style="{
+                    '--theme-color': AppSettings.theme.defaultColor,
+                }"
+            >
+                <div
+                    v-if="speedLimit !== 0"
+                    class="speed-limit-circle speed-limit-circle-sheet"
+                >
+                    <div class="speed-limit">
+                        {{ speedLimit }}
+                    </div>
+                </div>
+
+                <div class="sheet-header" @click="toggleSheet">
+                    <div class="drag-pill"></div>
+                </div>
+
+                <div class="sheet-body">
+                    <div class="top-row">
+                        <div class="trip-info" @click="toggleSheet">
+                            <h2 class="dest-name">{{ destinationName }}</h2>
+
+                            <div class="mini-stats" v-if="!isSheetExpanded">
+                                <span class="eta">{{ routeEta }}</span>
+                                <span class="dist">({{ routeDistance }})</span>
+                            </div>
+                        </div>
+
+                        <button
+                            class="cancel-btn nav-btn"
+                            @click.stop="clearRouteState"
+                        >
+                            <Icon
+                                name="material-symbols:close-rounded"
+                                size="24"
+                            />
+                        </button>
+                    </div>
+
+                    <div class="expanded-content">
+                        <div class="separator"></div>
+
+                        <div class="full-stats">
+                            <div class="stat-block">
+                                <Icon
+                                    name="tabler:clock-filled"
+                                    size="26"
+                                    class="icon-eta"
+                                />
+                                <div>
+                                    <div class="value">{{ routeEta }}</div>
+                                    <div class="label">Estimated Time</div>
+                                </div>
+                            </div>
+
+                            <div class="stat-block">
+                                <Icon
+                                    name="tabler:ruler-2"
+                                    size="26"
+                                    class="icon-dist"
+                                />
+                                <div>
+                                    <div class="value">{{ routeDistance }}</div>
+                                    <div class="label">Distance</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="action-buttons"
+                            @click.prevent="startNavigation"
+                        >
+                            <button class="start-btn nav-btn">
+                                <Icon
+                                    name="tabler:navigation-check"
+                                    size="24"
+                                />
+                                <span>Start Navigation</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Transition>
+
+        <div style="display: none">
+            <div ref="truckEl" class="truck-marker">
+                <svg
+                    width="48"
+                    height="48"
+                    viewBox="0 0 100 100"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    style="
+                        display: block;
+                        filter: drop-shadow(0px 6px 8px rgba(0, 0, 0, 0.3));
+                    "
+                >
+                    <defs>
+                        <linearGradient
+                            id="two-tone"
+                            x1="0%"
+                            y1="0%"
+                            x2="100%"
+                            y2="0%"
+                        >
+                            <stop
+                                offset="50%"
+                                :stop-color="
+                                    darkenColor(
+                                        AppSettings.theme.defaultColor,
+                                        0.1
+                                    )
+                                "
+                            />
+                            <stop
+                                offset="50%"
+                                :stop-color="
+                                    lightenColor(
+                                        AppSettings.theme.defaultColor,
+                                        0.23
+                                    )
+                                "
+                            />
+                        </linearGradient>
+                    </defs>
+
+                    <path
+                        d="M50 10 L90 85 L50 70 L10 85 Z"
+                        fill="url(#two-tone)"
+                        stroke="url(#two-tone)"
+                        stroke-width="12"
+                        stroke-linejoin="round"
+                        paint-order="stroke fill"
+                    />
+                </svg>
+            </div>
         </div>
     </div>
 </template>

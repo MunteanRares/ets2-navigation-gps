@@ -1,21 +1,42 @@
 import { ref, onUnmounted } from "vue";
 import type { TelemetryData } from "../../shared/types/Telemetry/TelemetryData";
-import proj4 from "proj4";
+import { convertGameToGeo } from "~/assets/utils/gameToGeo";
+import { getBearing } from "~/assets/utils/geographicMath";
+import { convertTelemtryTime } from "~/assets/utils/helpers";
 
 const TELEMETRY_API = "/api/ets2";
 
 export function useEtsTelemetry() {
-    const isConnected = ref(false);
+    const isTelemetryConnected = ref(false);
     const isRunning = ref(false);
+
+    // TRUCK STATE
     const truckCoords = ref<[number, number] | null>(null);
     const truckHeading = ref<number>(0);
     const truckSpeed = ref<number>(0);
+
+    // GAME STATE
+    const gameTime = ref<string>("");
+    const gameConnected = ref<boolean>(false);
+    const restStoptime = ref<string>("");
+    const restStopMinutes = ref<number>(0);
+
+    // NAVIGATION STATE
+    const speedLimit = ref<number>(0);
+    const fuel = ref<number>(0);
+
+    let lastPosition: [number, number] | null = null;
+    let headingOffset = 0;
 
     let fetchTimer: ReturnType<typeof setTimeout> | null = null;
     let abortController: AbortController | null = null;
 
     function startTelemetry(
-        onUpdate?: (coords: [number, number], heading: number) => void
+        onUpdate?: (
+            coords: [number, number],
+            heading: number,
+            time: string
+        ) => void
     ) {
         if (isRunning.value) return;
         isRunning.value = true;
@@ -27,7 +48,6 @@ export function useEtsTelemetry() {
             try {
                 if (abortController) abortController.abort();
                 abortController = new AbortController();
-
                 const timeoutId = setTimeout(
                     () => abortController?.abort(),
                     1000
@@ -35,32 +55,31 @@ export function useEtsTelemetry() {
 
                 const response = await fetch(TELEMETRY_API, {
                     signal: abortController.signal,
+                    cache: "no-cache",
+                    headers: { Pragma: "no-cache" },
                 });
 
                 clearTimeout(timeoutId);
 
                 if (response.ok) {
-                    const data = await response.json();
-
-                    if (data?.game?.connected) {
-                        isConnected.value = true;
-                        processData(data, onUpdate);
+                    const result = await response.json();
+                    if (result.connected && result.telemetry.game?.connected) {
+                        isTelemetryConnected.value = true;
+                        processData(result.telemetry, onUpdate);
                     } else {
-                        isConnected.value = false;
+                        resetDataOnDisconnected(onUpdate);
                     }
                 }
             } catch (err) {
                 if (err instanceof Error && err.name !== "AbortError") {
-                    isConnected.value = false;
+                    isTelemetryConnected.value = false;
                 }
             }
 
             const duration = performance.now() - startTime;
             const delay = Math.max(50, 100 - duration);
-
             fetchTimer = setTimeout(loop, delay);
         };
-
         loop();
     }
 
@@ -71,28 +90,117 @@ export function useEtsTelemetry() {
         fetchTimer = null;
     }
 
+    function resetDataOnDisconnected(
+        onUpdate?: (
+            coords: [number, number],
+            heading: number,
+            time: string,
+            gameConnected: boolean,
+            speedLimit: number,
+            speedKmh: number,
+            gas: string,
+            restStoptime: string
+        ) => void
+    ) {
+        const wasConnected = gameConnected.value;
+
+        isTelemetryConnected.value = false;
+        truckSpeed.value = 0;
+        gameConnected.value = false;
+        speedLimit.value = 0;
+        fuel.value = 0;
+        restStoptime.value = "0";
+
+        if (onUpdate && wasConnected) {
+            onUpdate([0, 0], 0, "", false, 0, 0, "0", "0");
+        }
+    }
+
     function processData(
         data: TelemetryData,
-        onUpdate?: (coords: [number, number], heading: number) => void
+        onUpdate?: (
+            coords: [number, number],
+            heading: number,
+            time: string,
+            gameConnected: boolean,
+            speedLimit: number,
+            speedKmh: number,
+            gas: string,
+            restStoptime: string
+        ) => void
     ) {
         const { x, z } = data.truck.placement;
-        const heading = data.truck.placement.heading;
-        const speed = data.truck.speed;
+        const rawGameHeading = data.truck.placement.heading;
+        const speedKmh = Math.max(0, Math.floor(data.truck.speed));
+        const currentCoords = convertGameToGeo(x, z);
 
-        // 2. CONVERT TO LAT/LON
-        const coords = convertGameToGeo(x, z);
+        const { formatted: formattedTime, raw } = convertTelemtryTime(
+            data.game.time
+        );
+        const day = raw.toUTCString().slice(0, 3);
+        const time = `${day} ${formattedTime}`;
 
-        // 3. UPDATE STATE
-        truckCoords.value = coords;
-        console.log(heading);
-        const degrees = -heading * 360;
+        const connected = data.game.connected;
+        const sLimit = data.navigation.speedLimit;
+        const gas = data.truck.fuel.toFixed(1);
 
-        truckHeading.value = degrees - 15;
-        truckSpeed.value = Math.floor(speed * 3.6);
+        const { formatted: restTime, raw: restRaw } = convertTelemtryTime(
+            data.game.nextRestStopTime
+        );
 
-        // 4. TRIGGER CALLBACK (For direct map manipulation)
+        const minutes = restRaw.getUTCHours() * 60 + restRaw.getUTCMinutes();
+
+        // Calculate heading correctly.
+        const rawDegrees = -rawGameHeading * 360;
+        if (lastPosition && speedKmh > 10) {
+            const dist = Math.sqrt(
+                Math.pow(currentCoords[0] - lastPosition[0], 2) +
+                    Math.pow(currentCoords[1] - lastPosition[1], 2)
+            );
+
+            if (dist > 0.00005) {
+                const trueBearing = getBearing(lastPosition, currentCoords);
+
+                let diff = trueBearing - rawDegrees;
+                while (diff < -180) diff += 360;
+                while (diff > 180) diff -= 360;
+
+                if (Math.abs(diff) < 90) {
+                    headingOffset += (diff - headingOffset) * 0.1;
+                }
+            }
+        }
+        let finalHeading = rawDegrees + headingOffset;
+        finalHeading = ((finalHeading % 360) + 360) % 360;
+
+        // Truck state.
+        truckCoords.value = currentCoords;
+        truckHeading.value = finalHeading;
+        truckSpeed.value = speedKmh;
+        fuel.value = parseInt(gas);
+
+        // Game state.
+        gameTime.value = time;
+        gameConnected.value = connected;
+        restStoptime.value = restTime;
+        restStopMinutes.value = minutes;
+
+        // Navigation state
+        speedLimit.value = sLimit;
+
+        lastPosition = currentCoords;
+
         if (onUpdate) {
-            onUpdate(coords, truckHeading.value);
+            onUpdate(
+                currentCoords,
+                finalHeading,
+                time,
+                connected,
+                sLimit,
+                speedKmh,
+                gas,
+                restTime
+            );
         }
     }
 
@@ -101,41 +209,16 @@ export function useEtsTelemetry() {
     });
 
     return {
-        isConnected,
-        isRunning,
+        fuel,
+        gameConnected,
         truckCoords,
         truckHeading,
         truckSpeed,
+        speedLimit,
+        restStoptime,
+        gameTime,
+        restStopMinutes,
         startTelemetry,
         stopTelemetry,
     };
-}
-
-const EARTH_RADIUS = 6370997;
-const DEG_LEN = (EARTH_RADIUS * Math.PI) / 180;
-
-const PROJ_DEF = "+proj=lcc +lat_1=37 +lat_2=65 +lat_0=50 +lon_0=15 +R=6370997";
-const MAP_OFFSET = [16660, 4150] as const;
-const MAP_FACTOR = [-0.000171570875, 0.0001729241463] as const;
-
-const converter = proj4(PROJ_DEF);
-
-function convertGameToGeo(gameX: number, gameZ: number): [number, number] {
-    let x = gameX - MAP_OFFSET[0];
-    let y = gameZ - MAP_OFFSET[1];
-
-    const ukScale = 0.75;
-    const calaisBound = [-31100, -5500] as const;
-
-    if (x * ukScale < calaisBound[0] && y * ukScale < calaisBound[1]) {
-        x = (x + calaisBound[0] / 2) * ukScale;
-        y = (y + calaisBound[1] / 2) * ukScale;
-    }
-
-    const projectedX = x * MAP_FACTOR[1] * DEG_LEN;
-    const projectedY = y * MAP_FACTOR[0] * DEG_LEN;
-
-    const result = converter.inverse([projectedX, projectedY]);
-
-    return result as [number, number];
 }

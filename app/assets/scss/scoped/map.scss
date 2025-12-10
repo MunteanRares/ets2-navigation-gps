@@ -1,4 +1,11 @@
 @use "~/assets/scss/global/variables" as *;
+
+$game-info-bar-height: 40px;
+$white-font-text: #f2f2f2;
+$speed-limit-height: 72px;
+$red-color: #dd4a34;
+
+// GENERAL
 .map-container {
     width: 100vw;
     height: 100vh;
@@ -17,36 +24,595 @@
     display: block;
 }
 
-.zoom-display {
+// LOADING GRAPH ROUTE SCREEN
+.loading-screen {
     position: absolute;
-    top: 20px;
-    left: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    color: #00ff00; /* Hacker Green */
-    padding: 8px 12px;
-    border-radius: 8px;
-    font-family: monospace;
-    font-size: 16px;
-    font-weight: bold;
-    z-index: 100; /* Above the map */
-    border: 1px solid #555;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+
+    z-index: 9999;
+
+    background-color: #272d39;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: $white-font-text;
+    font-family: "Quicksand", sans-serif;
 }
 
-.bottom-btn {
-    z-index: 1000;
+.progress-text {
+    font-size: 24px;
+    font-weight: bold;
+    color: $secondaryColor;
+    margin-top: 10px;
+    font-family: inherit;
+}
+
+.progress-bar-bg {
+    width: 200px;
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background-color: $secondaryColor;
+    transition: width 0.2s ease-out;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+    transition: opacity 0.6s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+    opacity: 0;
+}
+
+// GAME INFORMATION BAR
+.game-information {
     position: absolute;
-    bottom: 20px;
+    top: 0;
     left: 0;
+    width: 100%;
+    height: $game-info-bar-height;
+    color: $white-font-text;
 
-    background-color: #e53935;
-    opacity: 0.7;
-    transform: translateX(20%);
-    border-radius: 4px;
-    pointer-events: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    display: flex;
+    align-items: center;
+    padding: 0px 8px 0px 0px;
+    justify-content: space-between;
 
-    transition: 0.2s ease;
+    border-bottom: 3px solid $secondaryColor;
 
-    &:hover {
-        opacity: 1;
+    background-color: $primaryColor;
+}
+
+.truck-info {
+    display: flex;
+    align-items: center;
+}
+
+.gas-sleep-time {
+    display: flex;
+    gap: 0.8rem;
+}
+
+.gas-sleep {
+    display: flex;
+    gap: 0.4rem;
+}
+
+.game-time {
+    padding: 3px 8px;
+    font-weight: 650;
+    font-size: 1.6rem;
+    min-width: 7.5rem;
+    text-align: center;
+
+    background-color: rgb(21, 29, 37, 0.5);
+    border-radius: 8px;
+    border-left: 2px solid $secondaryColor;
+    border-right: 2px solid $secondaryColor;
+}
+
+.fuel-amount {
+    display: flex;
+    gap: 0.6rem;
+    font-size: 1.6rem;
+
+    align-items: center;
+    justify-content: center;
+
+    min-width: 8rem;
+
+    .liters {
+        opacity: 0.6;
+        margin-left: 3px;
+        font-size: 1.5rem;
     }
+
+    .pulse-red {
+        animation: pulseRed 2.5s infinite ease-in-out;
+    }
+
+    transition: color 0.4s ease;
+
+    @keyframes pulseRed {
+        0% {
+            color: inherit;
+        }
+
+        50% {
+            color: $red-color;
+        }
+
+        100% {
+            color: inherit;
+        }
+    }
+}
+
+.sleep-div {
+    display: flex;
+    gap: 0.6rem;
+    font-size: 1.6rem;
+    align-items: center;
+    min-width: 7rem;
+    text-align: center;
+
+    .sleep-icon {
+        font-size: 2rem;
+
+        transition: color 0.4s ease;
+    }
+
+    .pulse-blue {
+        animation: pulseBlue 2.5s infinite ease-in-out;
+    }
+
+    @keyframes pulseBlue {
+        0% {
+            color: inherit;
+        }
+
+        50% {
+            color: #226ae0;
+        }
+
+        100% {
+            color: inherit;
+        }
+    }
+}
+
+.disconnected-div {
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+    justify-content: center;
+
+    .disconnected-message {
+        font-size: 1.6rem;
+        font-weight: 600;
+    }
+
+    .disconnected-icon {
+        background-color: $red-color;
+        opacity: 0.9;
+        width: 20px;
+        height: 20px;
+    }
+}
+
+.truck-speed-div {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    gap: 0.3rem;
+    align-items: baseline;
+
+    min-width: 110px;
+    padding: 8px 0px 10px 0;
+}
+
+.road-perspective {
+    position: absolute;
+    bottom: 7px;
+    left: 0;
+    width: 100%;
+    height: 100%;
+
+    z-index: 0;
+
+    background: linear-gradient(
+        to top,
+        rgb(21, 29, 37, 1) 0%,
+        rgb(21, 29, 37, 0.6) 50%,
+        rgb(21, 29, 37, 0.4) 70%,
+        rgb(25, 34, 45, 0) 100%
+    );
+
+    transform-origin: bottom;
+    transform: perspective(60px) rotateX(50deg) scaleX(0.85);
+
+    border-left: 2px solid $secondaryColor;
+    border-right: 2px solid $secondaryColor;
+    border-radius: 8px;
+
+    pointer-events: none;
+}
+
+.truck-speed,
+.km-h {
+    position: relative;
+    font-weight: bold;
+}
+
+.truck-speed {
+    font-size: 2rem;
+    line-height: 1;
+}
+
+.km-h {
+    font-size: 1rem;
+    opacity: 0.7;
+}
+
+// UI INTERFACE BUTTONS
+:deep(.maplibregl-ctrl-group:first-of-type) {
+    margin-top: calc($game-info-bar-height + 20px);
+}
+
+:deep(.maplibregl-ctrl-group) {
+    background-color: $primaryColor;
+    border: 1px solid $secondaryColor;
+    color: $white-font-text;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    z-index: -10;
+
+    button {
+        background-color: transparent !important;
+        border: none;
+        border-bottom: 1px solid $secondaryColor;
+        transition: background-color 0.2s ease;
+
+        &:last-child {
+            border-bottom: none;
+        }
+
+        &:hover {
+            background-color: $secondaryColor !important;
+        }
+
+        .maplibregl-ctrl-icon {
+            filter: invert(1) brightness(2);
+        }
+    }
+}
+
+:deep(.maplibregl-ctrl-compass) {
+    .maplibregl-ctrl-icon {
+        filter: invert(1) grayscale(1);
+    }
+}
+
+.option-btn {
+    margin-top: calc($game-info-bar-height + 10px);
+    color: $white-font-text;
+    position: absolute;
+    padding: 3px 3px;
+    display: flex;
+    justify-self: center;
+    align-items: center;
+    cursor: pointer;
+    font-family: inherit;
+
+    background-color: $primaryColor;
+    border: 1px solid $secondaryColor;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: background-color 0.2s ease;
+
+    @media (hover: hover) {
+        &:hover {
+            background-color: $secondaryColor !important;
+        }
+    }
+
+    &:active {
+        background-color: $secondaryColor !important;
+    }
+}
+
+.reset-btn {
+    top: 10px;
+    right: 60px;
+    padding: 4px 8px;
+    font-weight: 600;
+}
+
+.center-btn {
+    top: 150px;
+    right: 9px;
+}
+
+// NAVIGATION WRAPPER
+.nav-btn {
+    background-color: var(--theme-color);
+    display: flex;
+    gap: 0.4rem;
+
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 1.6rem;
+    color: $white-font-text;
+
+    height: fit-content;
+    border: none;
+    border-radius: 8px;
+    padding: 4px 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+
+    justify-content: center;
+    align-items: center;
+
+    cursor: pointer;
+
+    transition: 0.2s ease-out;
+    &:active {
+        background-color: $secondaryColor !important;
+    }
+}
+
+.cancel-btn {
+    background-color: $secondaryColor;
+    padding: 3px 3px;
+}
+
+.start-btn {
+    width: 100%;
+    padding: 8px 12px;
+}
+
+.bottom-sheet {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    z-index: 2000;
+
+    background-color: $primaryColor;
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+
+    border: 2px solid var(--theme-color);
+    border-bottom: none;
+
+    display: flex;
+    flex-direction: column;
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bottom-circle-enter-active,
+.bottom-circle-leave-active {
+    transition: transform 0.4s ease, opacity 0.4s ease;
+}
+
+.bottom-circle-enter-from,
+.bottom-circle-leave-to {
+    transform: translateY(-10px);
+    opacity: 0;
+}
+
+.bottom-circle-enter-to,
+.bottom-circle-leave-from {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.speed-limit-circle {
+    position: absolute;
+
+    border: 5px solid $red-color;
+
+    background-color: $white-font-text;
+    border-radius: 100px;
+    width: $speed-limit-height;
+    height: calc($speed-limit-height - 3px);
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.speed-limit-circle-over-limit {
+    position: absolute;
+    top: calc(-1 * ($speed-limit-height - 46px));
+    right: calc(-1 * ($speed-limit-height - 55px));
+
+    border: 3.5px solid #304257;
+    border-radius: 100px;
+
+    width: (calc($speed-limit-height - 28px));
+    height: (calc($speed-limit-height - 28px));
+    background-color: #1d2833;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+.over-limit-enter-active,
+.over-limit-leave-active {
+    transition: opacity 0.3s ease-in-out;
+}
+.over-limit-enter-from,
+.over-limit-leave-to {
+    opacity: 0;
+}
+.over-limit-enter-to,
+.over-limit-leave-from {
+    opacity: 1;
+}
+
+.over-limit {
+    align-items: center;
+    justify-self: end;
+    color: $red-color;
+    font-size: 2rem;
+    font-weight: 800;
+}
+
+.speed-limit-circle-sheet {
+    top: calc(-1 * $speed-limit-height - 25px);
+    left: 20px;
+}
+
+.speed-limit-circle-bottom {
+    bottom: 25px;
+    left: 20px;
+}
+
+.speed-limit {
+    color: #272d39;
+    font-weight: 800;
+    letter-spacing: -0.8px;
+    font-size: 3.2rem;
+
+    max-width: 100%;
+    text-align: center;
+    line-height: 1;
+}
+
+.sheet-header {
+    width: 100%;
+    height: 24px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+
+    .drag-pill {
+        width: 40px;
+        height: 5px;
+        background-color: rgba(255, 255, 255, 0.2);
+        border-radius: 10px;
+    }
+}
+
+.sheet-body {
+    padding: 0 20px 20px 20px;
+}
+
+.top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.trip-info {
+    flex: 1;
+    cursor: pointer;
+
+    .dest-name {
+        margin: 0;
+        font-size: 2.2rem;
+        font-weight: 650;
+        color: $white-font-text;
+    }
+
+    .mini-stats {
+        display: flex;
+        gap: 8px;
+        font-size: 1.8rem;
+        margin-top: 4px;
+
+        .eta {
+            color: #2ecc71;
+            font-weight: 600;
+        }
+        .dist {
+            color: rgba(255, 255, 255, 0.6);
+        }
+    }
+}
+
+.expanded-content {
+    max-height: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease, opacity 0.3s ease;
+}
+
+.bottom-sheet.is-expanded {
+    .expanded-content {
+        max-height: 300px;
+        opacity: 1;
+        margin-top: 10px;
+    }
+
+    .drag-pill {
+        background-color: var(--theme-color);
+    }
+}
+
+.separator {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 10px 0 20px 0;
+}
+
+.full-stats {
+    display: flex;
+    justify-content: space-around;
+    margin-bottom: 25px;
+
+    .stat-block {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        .icon-eta {
+            color: #2ecc71;
+        }
+        .icon-dist {
+            color: var(--theme-color);
+        }
+
+        .value {
+            font-size: 1.9rem;
+            font-weight: 700;
+            color: $white-font-text;
+        }
+        .label {
+            font-size: 1.3rem;
+            color: rgba(255, 255, 255, 0.5);
+        }
+    }
+}
+
+.sheet-slide-enter-active,
+.sheet-slide-leave-active {
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sheet-slide-enter-from,
+.sheet-slide-leave-to {
+    transform: translateY(200%);
 }

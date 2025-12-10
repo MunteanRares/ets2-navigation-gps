@@ -51,6 +51,8 @@ interface BBoxItem {
     idx: number;
 }
 
+const roadTypeMap = { local: 0, freeway: 1, divided: 2, roundabout: 3 };
+
 const COORD_MAX_DECIMALS = 6;
 function coordKey(c: Coord) {
     return `${c[0].toFixed(COORD_MAX_DECIMALS)},${c[1].toFixed(
@@ -453,10 +455,7 @@ function createNodesAndEdges(
         const isFreeway =
             props.roadType === "freeway" || props.roadType === "divided";
         const inferredDir = directionInference[i];
-        const isManualFix =
-            props.type === null &&
-            props.leftLanes === null &&
-            props.rightLanes === null;
+        const isManualFix = props.roadType === "manual";
 
         // --- SEGMENT LOOP ---
         for (let point = 0; point < cleaned.length - 1; point++) {
@@ -480,47 +479,30 @@ function createNodesAndEdges(
             if (isRoundabout) {
                 backwardWeight = STRICT_BLOCK;
             } else if (isManualFix) {
-                // backwardWeight = STRICT_BLOCK;
+                backwardWeight = STRICT_BLOCK;
             } else if (isFreeway) {
-                const laneSaysForward = (props.rightLanes || 0) > 0;
-                const laneSaysBackward = (props.leftLanes || 0) > 0;
-
                 // Combine Lane Data + Topology Inference
                 if (inferredDir === 1) {
                     backwardWeight = distance + PENALTY_FLAT;
                 } else if (inferredDir === -1) {
                     forwardWeight = distance + PENALTY_FLAT;
-                } else {
-                    if (laneSaysForward && !laneSaysBackward)
-                        backwardWeight = distance + PENALTY_FLAT;
-                    else if (laneSaysBackward && !laneSaysForward)
-                        forwardWeight = distance + PENALTY_FLAT;
                 }
             }
-
-            const eprops = {
-                featureId: props.id,
-                roadType: props.roadType,
-                leftLanes: props.leftLanes,
-                rightLanes: props.rightLanes,
-            };
 
             if (forwardWeight !== Infinity) {
                 edges.push({
                     from: firstFromPair,
                     to: secondFromPair,
-                    weight: forwardWeight,
-                    featureId: eprops.featureId,
-                    properties: eprops,
+                    w: Math.round(forwardWeight * 10) / 10,
+                    r: roadTypeMap[props.roadType] || 0,
                 });
             }
             if (backwardWeight !== Infinity) {
                 edges.push({
                     from: secondFromPair,
                     to: firstFromPair,
-                    weight: backwardWeight,
-                    featureId: eprops.featureId,
-                    properties: eprops,
+                    w: Math.round(forwardWeight * 10) / 10,
+                    r: roadTypeMap[props.roadType] || 0,
                 });
             }
         }
@@ -530,93 +512,18 @@ function createNodesAndEdges(
 }
 
 //// SAVES THE NODES.JSON AND EDGES.JSON TO DISK
-function saveFilesToDisk(
-    outDir: any,
-    nodes: Node[],
-    edges: Edge[],
-    features: InputFeature[]
-) {
+function saveFilesToDisk(outDir: any, nodes: Node[], edges: Edge[]) {
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    const packedNodes = nodes.map((n) => [
+        Math.round(n.lat * 1e5),
+        Math.round(n.lng * 1e5),
+    ]);
+    const packedEdges = edges.map((e) => [e.from, e.to, e.w, e.r]);
 
-    writeFileSync(path.join(outDir, "nodes.json"), JSON.stringify(nodes));
-    writeFileSync(path.join(outDir, "edges.json"), JSON.stringify(edges));
+    writeFileSync(path.join(outDir, "nodes.json"), JSON.stringify(packedNodes));
+    writeFileSync(path.join(outDir, "edges.json"), JSON.stringify(packedEdges));
 
-    console.log("Nodes: ", nodes.length, "Edges:", edges.length);
-    writeFileSync(
-        path.join(outDir, "meta.json"),
-        JSON.stringify({
-            totalFeatures: features.length,
-            totalNodes: nodes.length,
-            totalEdges: edges.length,
-            generatedAt: new Date().toISOString(),
-        })
-    );
-}
-
-async function saveGraphAsGeoJSON(
-    outDir: string,
-    nodes: Node[],
-    edges: Edge[]
-) {
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-
-    const filePath = path.join(outDir, "graph_combined.geojson");
-    console.log(`Streaming GeoJSON to ${filePath}...`);
-
-    const stream = createWriteStream(filePath, { encoding: "utf8" });
-
-    stream.write('{\n"type": "FeatureCollection",\n"features": [\n');
-
-    let isFirst = true;
-
-    for (const node of nodes) {
-        if (!isFirst) stream.write(",\n");
-        const feature = {
-            type: "Feature",
-            geometry: {
-                type: "Point",
-                coordinates: [node.lng, node.lat],
-            },
-            properties: {
-                id: node.id,
-                type: "node",
-            },
-        };
-        stream.write(JSON.stringify(feature));
-        isFirst = false;
-    }
-
-    for (const edge of edges) {
-        const fromNode = nodes[edge.from];
-        const toNode = nodes[edge.to];
-
-        if (!fromNode || !toNode) continue;
-
-        if (!isFirst) stream.write(",\n");
-        const feature = {
-            type: "Feature",
-            geometry: {
-                type: "LineString",
-                coordinates: [
-                    [fromNode.lng, fromNode.lat],
-                    [toNode.lng, toNode.lat],
-                ],
-            },
-            properties: {
-                featureId: edge.featureId,
-                weight: edge.weight,
-                roadType: edge.properties?.roadType ?? null,
-                type: "edge",
-            },
-        };
-        stream.write(JSON.stringify(feature));
-        isFirst = false;
-    }
-
-    stream.write("\n]\n}");
-    stream.end();
-
-    console.log("Combined GeoJSON saved via stream.");
+    console.log(`Saved ${nodes.length} nodes and ${edges.length} edges.`);
 }
 
 //// BUILD GRAPH
@@ -647,9 +554,8 @@ function buildGraph(inputDir: string, outDir: string) {
 
     console.log("Collected intersection points. Now building nodes & edges...");
     const { nodes, edges } = createNodesAndEdges(features, splitPointsToMap);
-    // saveGraphAsGeoJSON(outDir, nodes, edges);
 
-    saveFilesToDisk(outDir, nodes, edges, features);
+    saveFilesToDisk(outDir, nodes, edges);
     console.log("Graph saved to:", outDir);
     console.log("Process finished!");
 }
