@@ -124,7 +124,7 @@ export function useRouting() {
 
                         if (absAngle > 98) {
                             stepCost += Infinity;
-                        } else if (angle < -5) {
+                        } else if (angle < -45) {
                             stepCost += 2000;
                         } else if (angle > 45) {
                             stepCost += 500;
