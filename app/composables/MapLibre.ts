@@ -41,6 +41,7 @@ export async function initializeMap(
                 id: "ets2-lines",
                 type: "line",
                 source: "ets2",
+                filter: ["!=", ["get", "type"], "ferry"],
                 "source-layer": "ets2",
                 paint: {
                     "line-color": "#3d546e",
@@ -115,6 +116,12 @@ export async function initializeMap(
             data: "map-data/ets2-prefabs.geojson",
         });
 
+        // DISPLAY COUNTRY NAMES
+        map.addSource("ets2-countries", {
+            type: "geojson",
+            data: "map-data/ets2-country-names.geojson",
+        });
+
         ////
         //// LAYERS FOR DISPLAYING
         //// FROM SOURCES
@@ -156,6 +163,7 @@ export async function initializeMap(
             type: "line",
             source: "ets2",
             "source-layer": "ets2",
+            filter: ["!=", ["get", "type"], "ferry"],
             layout: {
                 "line-join": "round",
                 "line-cap": "round",
@@ -315,6 +323,7 @@ export async function initializeMap(
                 "text-size": 13,
                 "text-anchor": "center",
                 "text-offset": [0, 0],
+                "text-allow-overlap": true,
             },
             paint: {
                 "text-color": "#ffffff",
@@ -322,77 +331,29 @@ export async function initializeMap(
             minzoom: 7.9,
         });
 
-        // DISPLAYING CITY NAMES
-        map.addLayer({
-            id: "city-labels",
-            type: "symbol",
-            source: "ets2-cities",
-            layout: {
-                "text-field": ["get", "name"],
-                "text-font": ["Quicksand"],
-                "text-size": 15,
-                "text-anchor": "bottom",
-                "text-offset": [0, -0.3],
-            },
-            paint: {
-                "text-color": "#ffffff",
-
-                "text-halo-color": "#ffffff",
-                "text-halo-width": 0.3,
-            },
-            minzoom: 5.5,
-            maxzoom: 8,
-        });
-
         // DISPLAYING CITY DOTS
-        map.addLayer(
-            {
-                id: "city-points",
-                type: "circle",
-                source: "ets2-cities",
-                minzoom: 5.5,
-                maxzoom: 6.7,
-                paint: {
-                    "circle-color": appTheme.defaultColor,
-
-                    "circle-radius": [
-                        "interpolate",
-                        ["linear"],
-                        ["zoom"],
-                        5,
-                        4, // Smaller at low zoom
-                        10,
-                        7, // Larger at high zoom
-                    ],
-
-                    "circle-stroke-width": 1,
-                    "circle-stroke-color": "#222",
-                },
-            },
-            "city-labels"
-        );
-
-        // DISPLAYING CAPITAL NAMES
         map.addLayer({
-            id: "capital-major-labels",
-            type: "symbol",
-            filter: ["==", ["get", "capital"], 2],
+            id: "city-points",
+            type: "circle",
             source: "ets2-cities",
-            layout: {
-                "text-field": ["get", "name"],
-                "text-size": 18,
-                "text-font": ["Quicksand"],
-                "text-anchor": "bottom",
-                "text-allow-overlap": true,
-                "text-offset": [0, -0.3],
-            },
+            minzoom: 5.5,
+            maxzoom: 6.7,
             paint: {
-                "text-color": "#ffffff",
-                "text-halo-color": "#ffffff",
-                "text-halo-width": 0.5,
+                "circle-color": appTheme.defaultColor,
+
+                "circle-radius": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    5,
+                    4, // Smaller at low zoom
+                    10,
+                    7, // Larger at high zoom
+                ],
+
+                "circle-stroke-width": 1,
+                "circle-stroke-color": "#222",
             },
-            minzoom: 5,
-            maxzoom: 8,
         });
 
         // DISPLAYING CAPITAL DOTS
@@ -789,6 +750,74 @@ export async function initializeMap(
                 ],
                 "symbol-placement": "point",
             },
+        });
+
+        // DISPLAYING CITY NAMES
+        map.addLayer({
+            id: "city-labels",
+            type: "symbol",
+            source: "ets2-cities",
+            filter: ["!=", ["get", "capital"], 2],
+            layout: {
+                "text-field": ["get", "name"],
+                "text-font": ["Quicksand"],
+                "text-size": 15,
+                "text-anchor": "bottom",
+                "text-offset": [0, -0.3],
+                "text-allow-overlap": true,
+            },
+            paint: {
+                "text-color": "#ffffff",
+
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 0.3,
+            },
+            minzoom: 5.5,
+            maxzoom: 8,
+        });
+
+        // DISPLAYING CAPITAL NAMES
+        map.addLayer({
+            id: "capital-major-labels",
+            type: "symbol",
+            filter: ["==", ["get", "capital"], 2],
+            source: "ets2-cities",
+            layout: {
+                "text-field": ["get", "name"],
+                "text-size": 18,
+                "text-font": ["Quicksand"],
+                "text-anchor": "bottom",
+                "text-offset": [0, -0.3],
+            },
+            paint: {
+                "text-color": "#ffffff",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 0.5,
+            },
+            minzoom: 5,
+            maxzoom: 8,
+        });
+
+        // DISPLAYING COUNTRY NAMES
+        map.addLayer({
+            id: "country-labels",
+            type: "symbol",
+            source: "ets2-countries",
+            layout: {
+                "text-field": ["get", "name"],
+                "text-size": 20,
+                "text-font": ["Quicksand"],
+                "text-anchor": "bottom",
+                "text-offset": [0, -0.3],
+            },
+            paint: {
+                "text-color": "#ffffff",
+                "text-halo-color": "#ffffff",
+                "text-halo-width": 0.5,
+                "text-opacity": 0.5,
+            },
+            minzoom: 5,
+            maxzoom: 5.5,
         });
 
         map.addControl(new maplibregl.NavigationControl());

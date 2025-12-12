@@ -1,0 +1,32 @@
+{
+"type": "FeatureCollection",
+"name": "ets2",
+"features": [
+{ "type": "Feature", "properties": { "type": "country", "name": "Austria" }, "geometry": { "type": "Point", "coordinates": [ 14.548104269852255, 47.415028000927435 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Belgium" }, "geometry": { "type": "Point", "coordinates": [ 4.385507917050309, 50.443359526404038 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Bulgaria" }, "geometry": { "type": "Point", "coordinates": [ 24.784056724993679, 42.500585351882286 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Czech Republic" }, "geometry": { "type": "Point", "coordinates": [ 15.506550583918647, 49.671809093962288 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Denmark" }, "geometry": { "type": "Point", "coordinates": [ 9.018324731713308, 56.075747020011001 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Estonia" }, "geometry": { "type": "Point", "coordinates": [ 24.698590783091745, 58.780909549363741 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Finland" }, "geometry": { "type": "Point", "coordinates": [ 24.448589603266999, 61.881437153180499 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "France" }, "geometry": { "type": "Point", "coordinates": [ 2.31054979264959, 46.404365872990731 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Germany" }, "geometry": { "type": "Point", "coordinates": [ 9.530440346548774, 50.669409131768703 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Hungary" }, "geometry": { "type": "Point", "coordinates": [ 19.008913642146144, 46.949315549049146 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Italy" }, "geometry": { "type": "Point", "coordinates": [ 9.765896592889288, 45.025727084812061 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Latvia" }, "geometry": { "type": "Point", "coordinates": [ 25.793204546333225, 57.189911344922365 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Lithuania" }, "geometry": { "type": "Point", "coordinates": [ 22.961910239914022, 55.43716388777721 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Luxembourg" }, "geometry": { "type": "Point", "coordinates": [ 5.650208080210271, 49.838680045426017 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Netherlands" }, "geometry": { "type": "Point", "coordinates": [ 5.624854807157506, 52.072762186345145 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Norway" }, "geometry": { "type": "Point", "coordinates": [ 8.07792527210481, 60.264381169252808 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Poland" }, "geometry": { "type": "Point", "coordinates": [ 19.494683675660305, 52.122247967215287 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Portugal" }, "geometry": { "type": "Point", "coordinates": [ -8.959802293799479, 39.43381501298601 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Romania" }, "geometry": { "type": "Point", "coordinates": [ 25.389419499032893, 45.626898729112511 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Russia" }, "geometry": { "type": "Point", "coordinates": [ 29.82189646642307, 59.044109431358052 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Slovakia" }, "geometry": { "type": "Point", "coordinates": [ 19.133189060414129, 48.446798154133887 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Spain" }, "geometry": { "type": "Point", "coordinates": [ -4.273087110980271, 39.542037181490294 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Sweden" }, "geometry": { "type": "Point", "coordinates": [ 14.26504085192442, 58.673899082113842 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Switzerland" }, "geometry": { "type": "Point", "coordinates": [ 8.245769314135536, 46.727453402769591 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "Türkiye" }, "geometry": { "type": "Point", "coordinates": [ 27.487944543639454, 41.662034700813749 ] } },
+{ "type": "Feature", "properties": { "type": "country", "name": "United Kingdom" }, "geometry": { "type": "Point", "coordinates": [ -1.198602154418705, 51.68194566287935 ] } }
+]
+}
