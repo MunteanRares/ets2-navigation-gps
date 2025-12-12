@@ -47,10 +47,10 @@ const {
 
 const {
     isCameraLocked,
-    isNavigating,
     initCameraListeners,
     followTruck,
     startNavigationMode,
+    lockCamera,
 } = useMapCamera(map);
 
 const {
@@ -146,16 +146,6 @@ function onStartNavigation() {
 function onToggleSheet() {
     isSheetExpanded.value = !isSheetExpanded.value;
 }
-
-const onClearRoute = () => {
-    isNavigating.value = false;
-    isSheetExpanded.value = false;
-    isCameraLocked.value = false;
-};
-
-const onCenterTruck = () => {
-    isCameraLocked.value = true;
-};
 </script>
 
 <template>
@@ -216,7 +206,7 @@ const onCenterTruck = () => {
             </div>
         </Transition>
 
-        <button class="option-btn center-btn" @click.prevent="onCenterTruck">
+        <button class="option-btn center-btn" @click.prevent="lockCamera">
             <Icon name="fe:target" size="24" class="target-icon" />
         </button>
 
