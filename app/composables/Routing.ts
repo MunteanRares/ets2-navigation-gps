@@ -59,6 +59,7 @@ export function useRouting() {
         if (!targetNode) return null;
 
         const HEURISTIC_SCALE = 1.2;
+
         function heuristic(nodeId: number): number {
             const node = nodeCoords.get(nodeId);
             if (!node) return 0;
@@ -117,6 +118,21 @@ export function useRouting() {
                         );
                         const absAngle = Math.abs(angle);
 
+                        //// ========== BLOCKING U TURNS
+                        const distFromPrev = distance(
+                            point(prevCoord),
+                            point(currentCoord),
+                            { units: "kilometers" }
+                        );
+
+                        const isZigZag = distFromPrev < 0.2 && absAngle > 65;
+
+                        if (isZigZag) {
+                            stepCost += 10_000_000;
+                        }
+
+                        ////  BLOCKING U TURNS ==========
+
                         if (edge.r === 2) {
                             stepCost *= 1.1;
                             if (angle < -100) stepCost += 100_000;
@@ -148,6 +164,7 @@ export function useRouting() {
             }
         }
 
+        // ... (Return logic remains same)
         if (foundEndId === null) return null;
 
         const path: [number, number][] = [];
