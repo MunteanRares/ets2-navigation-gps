@@ -70,7 +70,7 @@ export function useCityData() {
                 feature.properties.scaleRank &&
                 feature.properties.scaleRank < 3
             ) {
-                safeRadius = 2000;
+                safeRadius = 500;
             }
 
             if (distToCityCenter < safeRadius) {
