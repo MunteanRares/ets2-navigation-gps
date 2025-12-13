@@ -41,7 +41,7 @@ export class MinHeap {
     }
 
     clear() {
-        return this.length;
+        this.length = 0;
     }
 
     private resize() {

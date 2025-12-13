@@ -104,10 +104,10 @@ onMounted(async () => {
             initCameraListeners();
         });
 
-        map.value.on("click", (e) => {
+        map.value.on("click", async (e) => {
             if (!truckMarker.value) return;
 
-            handleRouteClick(
+            await handleRouteClick(
                 [e.lngLat.lng, e.lngLat.lat],
                 [
                     truckMarker.value.getLngLat().lng,
@@ -115,8 +115,6 @@ onMounted(async () => {
                 ],
                 truckHeading.value
             );
-
-            if (endMarker.value) isSheetExpanded.value = true;
         });
 
         startTelemetry(() => {

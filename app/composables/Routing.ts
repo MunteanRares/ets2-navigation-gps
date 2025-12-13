@@ -10,6 +10,7 @@ const MAX_NODES = 900000;
 const cache_costs = new Float64Array(MAX_NODES);
 const cache_previous = new Int32Array(MAX_NODES);
 const cache_visited = new Uint8Array(MAX_NODES);
+const openHeap = new MinHeap(50000);
 
 let cache_flatCoords: Float64Array | null = null;
 
@@ -90,8 +91,7 @@ export function useRouting() {
         cache_costs.fill(Infinity);
         cache_previous.fill(-1);
         cache_visited.fill(0);
-
-        const openHeap = new MinHeap(5000);
+        openHeap.clear();
 
         let destLng = 0,
             destLat = 0;
@@ -116,7 +116,7 @@ export function useRouting() {
         const startLat = flatCoords[start * 2 + 1]!;
 
         const distKm = fastDistKm(startLng, startLat, destLng, destLat);
-        const maxIterations = 5000 + distKm * 500;
+        const maxIterations = 5000 + distKm * 300;
 
         const HEURISTIC_SCALE = 3.0;
 
@@ -191,6 +191,7 @@ export function useRouting() {
                         }
                     }
 
+                    // TODO: Inline Angle Calculation (optimization for faster iter)
                     const angle = getSignedAngle(
                         [pLng, pLat],
                         [cLng, cLat],
@@ -209,7 +210,7 @@ export function useRouting() {
                         cLng,
                         cLat
                     );
-                    const isZigZag = distFromImm < 0.2 && absAngle > 89;
+                    const isZigZag = distFromImm < 0.2 && absAngle > 120;
 
                     if (isZigZag) stepCost += 1_000_000_000;
 

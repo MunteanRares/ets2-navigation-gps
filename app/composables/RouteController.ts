@@ -28,6 +28,7 @@ export const useRouteController = (
     const startNodeId = ref<number | null>(null);
     const endNodeId = ref<number | null>(null);
     const lastMathPos = ref<[number, number] | null>(null);
+    const isCalculating = ref(false);
 
     let worker: Worker | null = null;
 
@@ -287,48 +288,67 @@ export const useRouteController = (
         truckCoords: [number, number],
         truckHeading: number
     ) {
-        if (adjacency.size === 0) return;
+        if (adjacency.size === 0 || isCalculating.value) return;
 
-        const startConfig = findBestStartConfiguration(
-            truckCoords,
-            truckHeading,
-            10
-        );
+        isCalculating.value = true;
 
-        if (!startConfig) {
-            console.warn("Could not find a valid road matching truck heading.");
-            return;
-        }
-
-        startNodeId.value = startConfig.toId;
-        console.log(clickCoords);
-
-        const endCandidates = getClosestNodes(clickCoords, 10, 0.1);
-        if (endCandidates.length === 0) return;
-
-        const result = await findFlexibleRoute(
-            startNodeId.value!,
-            clickCoords,
-            truckHeading,
-            startConfig.type as "road" | "yard"
-        );
-
-        if (result) {
-            if (endMarker.value) endMarker.value.remove();
-            endNodeId.value = result.endId;
-            const stitchedPath = [startConfig.projectedCoords, ...result.path];
-            currentRoutePath.value = stitchedPath;
-
-            drawRouteOnMap(stitchedPath);
-            addDestinationMarker(result.endId);
-
-            const details = calculateGameRouteDetails(stitchedPath);
-            routeDistance.value = `${details.km} km`;
-            routeEta.value = details.time;
-            destinationName.value = getGameLocationName(
-                clickCoords[0],
-                clickCoords[1]
+        try {
+            const startConfig = findBestStartConfiguration(
+                truckCoords,
+                truckHeading,
+                10
             );
+
+            if (!startConfig) {
+                console.warn(
+                    "Could not find a valid road matching truck heading."
+                );
+                return;
+            }
+
+            startNodeId.value = startConfig.toId;
+            console.log(clickCoords);
+
+            const endCandidates = getClosestNodes(clickCoords, 10, 0.1);
+            if (endCandidates.length === 0) return;
+
+            const result = await findFlexibleRoute(
+                startNodeId.value!,
+                clickCoords,
+                truckHeading,
+                startConfig.type as "road" | "yard"
+            );
+
+            if (result) {
+                if (endMarker.value) {
+                    endMarker.value.remove();
+                    endMarker.value = null;
+                }
+
+                endNodeId.value = result.endId;
+                const stitchedPath = [
+                    startConfig.projectedCoords,
+                    ...result.path,
+                ];
+                currentRoutePath.value = stitchedPath;
+
+                drawRouteOnMap(stitchedPath);
+                addDestinationMarker(result.endId);
+
+                const details = calculateGameRouteDetails(stitchedPath);
+                routeDistance.value = `${details.km} km`;
+
+                routeEta.value = details.time;
+
+                destinationName.value = getGameLocationName(
+                    clickCoords[0],
+                    clickCoords[1]
+                );
+            }
+        } catch (e) {
+            console.log(`Route calculation Failed: ${e}`);
+        } finally {
+            isCalculating.value = false;
         }
     }
 
@@ -357,21 +377,25 @@ export const useRouteController = (
                 routeLine
             );
 
-            const distKm = length(remainingSection, { units: "kilometers" });
+            const remainingCoords = remainingSection.geometry.coordinates as [
+                number,
+                number
+            ][];
 
-            if (distKm < 1) {
+            if (remainingCoords.length < 2) {
                 clearRouteState();
                 return;
             }
 
-            routeDistance.value = `${distKm.toFixed(0)} km`;
+            const details = calculateGameRouteDetails(remainingCoords);
 
-            // TODO: More accurate avgSpeed
-            const avgSpeed = 70;
-            const hours = distKm / avgSpeed;
+            if (details.km < 1) {
+                clearRouteState();
+                return;
+            }
 
-            const mins = Math.round(hours * 60);
-            routeEta.value = `${Math.floor(mins / 60)}h ${mins % 60}m`;
+            routeDistance.value = `${details.km} km`;
+            routeEta.value = details.time;
         } catch (e) {
             console.error(e);
         }
@@ -401,8 +425,9 @@ export const useRouteController = (
         routeDistance,
         routeEta,
         endMarker,
-        initWorkerData,
+        isCalculating,
         currentRoutePath,
+        initWorkerData,
         setupRouteLayer,
         handleRouteClick,
         updateRouteProgress,
