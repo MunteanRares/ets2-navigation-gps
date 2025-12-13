@@ -48,22 +48,40 @@ export function useRouting() {
         startHeading: number | null,
         adjacency: Map<number, { to: number; weight: number; r: number }[]>,
         nodeCoords: Map<number, [number, number]>,
-        startType: "road" | "yard" = "road"
+        startType: "road" | "yard" = "road",
+        targetLocation?: [number, number]
     ): { path: [number, number][]; endId: number } | null => {
         const costs = new Map<number, number>();
         const previous = new Map<number, number>();
         const openHeap = new MinHeap();
 
-        const firstEndId = [...possibleEnds][0]!;
-        const targetNode = nodeCoords.get(firstEndId);
-        if (!targetNode) return null;
+        let destCoord = targetLocation;
+        if (!destCoord) {
+            const firstEndId = [...possibleEnds][0];
+            if (firstEndId !== undefined)
+                destCoord = nodeCoords.get(firstEndId);
+        }
+        if (!destCoord) return null;
+
+        const startCoord = nodeCoords.get(start);
+        let maxIterations = 10000;
+
+        if (startCoord) {
+            const distKm = distance(point(startCoord), point(destCoord), {
+                units: "kilometers",
+            });
+
+            // Allow 200 nodes per kilometer + the base budget
+            maxIterations = 5000 + distKm * 300;
+        }
 
         const HEURISTIC_SCALE = 1.2;
+
         function heuristic(nodeId: number): number {
             const node = nodeCoords.get(nodeId);
             if (!node) return 0;
-            const dx = node[0] - targetNode![0];
-            const dy = node[1] - targetNode![1];
+            const dx = node[0] - destCoord![0];
+            const dy = node[1] - destCoord![1];
             return Math.sqrt(dx * dx + dy * dy) * HEURISTIC_SCALE;
         }
 
@@ -72,8 +90,14 @@ export function useRouting() {
 
         let foundEndId: number | null = null;
         const visited = new Set<number>();
+        let iterations = 0;
 
         while (openHeap.size() > 0) {
+            iterations++;
+            if (iterations > maxIterations) {
+                return null;
+            }
+
             const currentId = openHeap.pop();
             if (currentId === undefined) break;
 
@@ -88,8 +112,6 @@ export function useRouting() {
             const neighbors = adjacency.get(currentId) || [];
             const currentCoord = nodeCoords.get(currentId);
             const prevId = previous.get(currentId);
-            const prevCoord =
-                prevId !== undefined ? nodeCoords.get(prevId) : null;
             const currentG = costs.get(currentId) ?? Infinity;
 
             for (const edge of neighbors) {
@@ -109,14 +131,45 @@ export function useRouting() {
                             if (diff > 90) stepCost += 10_000_000;
                             else if (diff > 45) stepCost += 1000;
                         }
-                    } else if (prevCoord) {
+                    } else if (prevId !== undefined) {
+                        let refCoord = nodeCoords.get(prevId)!;
+                        let distToPrev = distance(
+                            point(refCoord),
+                            point(currentCoord),
+                            { units: "meters" }
+                        );
+
+                        if (distToPrev < 5) {
+                            const grandPrevId = previous.get(prevId);
+                            if (grandPrevId !== undefined) {
+                                refCoord = nodeCoords.get(grandPrevId)!;
+                            }
+                        }
+
                         const angle = getSignedAngle(
-                            prevCoord,
+                            refCoord,
                             currentCoord,
                             neighborCoord
                         );
                         const absAngle = Math.abs(angle);
 
+                        // ====== BLOCKING U-TURNS
+
+                        const immediatePrevCoord = nodeCoords.get(prevId)!;
+                        const distFromImmediate = distance(
+                            point(immediatePrevCoord),
+                            point(currentCoord),
+                            { units: "kilometers" }
+                        );
+
+                        const isZigZag =
+                            distFromImmediate < 0.2 && absAngle > 89;
+
+                        if (isZigZag) stepCost += 1_000_000_000;
+
+                        // BLOCKING U-TURNS ======
+
+                        // ANGLE CHECKS
                         if (edge.r === 2) {
                             stepCost *= 1.1;
                             if (angle < -100) stepCost += 100_000;
