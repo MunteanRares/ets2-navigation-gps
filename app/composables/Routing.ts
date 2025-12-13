@@ -75,7 +75,7 @@ export function useRouting() {
             maxIterations = 5000 + distKm * 300;
         }
 
-        const HEURISTIC_SCALE = 1.2;
+        const HEURISTIC_SCALE = 5;
 
         function heuristic(nodeId: number): number {
             const node = nodeCoords.get(nodeId);
