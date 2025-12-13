@@ -42,6 +42,18 @@ function fastDistKm(
     return Math.sqrt(dx * dx + dy * dy);
 }
 
+function getHeading(x1: number, y1: number, x2: number, y2: number): number {
+    return Math.atan2(y2 - y1, x2 - x1);
+}
+
+function getRadianAngleDiff(a1: number, a2: number): number {
+    let diff = Math.abs(a1 - a2);
+    if (diff > Math.PI) {
+        diff = 2 * Math.PI - diff;
+    }
+    return diff;
+}
+
 export function useRouting() {
     const mergeClosePoints = (
         coords: [number, number][],
@@ -116,7 +128,7 @@ export function useRouting() {
         const startLat = flatCoords[start * 2 + 1]!;
 
         const distKm = fastDistKm(startLng, startLat, destLng, destLat);
-        const maxIterations = 5000 + distKm * 300;
+        const maxIterations = 5000 + distKm * 500;
 
         const HEURISTIC_SCALE = 3.0;
 
@@ -181,17 +193,6 @@ export function useRouting() {
                     let pLng = flatCoords[prevId * 2]!;
                     let pLat = flatCoords[prevId * 2 + 1]!;
 
-                    const distToPrev = fastDistKm(pLng, pLat, cLng, cLat);
-
-                    if (distToPrev < 0.005) {
-                        const grandPrevId = cache_previous[prevId]!;
-                        if (grandPrevId !== -1) {
-                            pLng = flatCoords[grandPrevId * 2]!;
-                            pLat = flatCoords[grandPrevId * 2 + 1]!;
-                        }
-                    }
-
-                    // TODO: Inline Angle Calculation (optimization for faster iter)
                     const angle = getSignedAngle(
                         [pLng, pLat],
                         [cLng, cLat],
@@ -199,22 +200,39 @@ export function useRouting() {
                     );
                     const absAngle = Math.abs(angle);
 
-                    // ===== BLOCKING U-TURN
+                    const distPrevToCurr = fastDistKm(pLng, pLat, cLng, cLat);
 
-                    const immPLng = flatCoords[prevId * 2]!;
-                    const immPLat = flatCoords[prevId * 2 + 1]!;
+                    if (distPrevToCurr < 0.2) {
+                        const grandPrevId = cache_previous[prevId]!;
 
-                    const distFromImm = fastDistKm(
-                        immPLng,
-                        immPLat,
-                        cLng,
-                        cLat
-                    );
-                    const isZigZag = distFromImm < 0.2 && absAngle > 120;
+                        if (grandPrevId !== -1) {
+                            const gpLng = flatCoords[grandPrevId * 2]!;
+                            const gpLat = flatCoords[grandPrevId * 2 + 1]!;
 
-                    if (isZigZag) stepCost += 1_000_000_000;
+                            const headingIn = getHeading(
+                                gpLng,
+                                gpLat,
+                                pLng,
+                                pLat
+                            );
 
-                    // BLOCKING U-TURN =====
+                            const headingOut = getHeading(
+                                cLng,
+                                cLat,
+                                nLng,
+                                nLat
+                            );
+
+                            const radianDiff = getRadianAngleDiff(
+                                headingIn,
+                                headingOut
+                            );
+
+                            if (radianDiff > 1.2) {
+                                stepCost += Infinity;
+                            }
+                        }
+                    }
 
                     if (edge.r === 2) {
                         stepCost *= 1.1;
@@ -241,7 +259,6 @@ export function useRouting() {
             }
         }
 
-        // ... (Return logic remains same)
         if (foundEndId === null) return null;
 
         const path: [number, number][] = [];
