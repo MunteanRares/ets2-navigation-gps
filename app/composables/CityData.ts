@@ -1,5 +1,9 @@
 import { shallowRef, ref } from "vue";
 import { convertGeoToGame } from "~/assets/utils/gameToGeo";
+import {
+    getScaleMultiplier,
+    type SimpleCityNode,
+} from "~/assets/utils/routeAlgorithm";
 
 // --- Types ---
 interface GeoJsonProperties {
@@ -27,6 +31,7 @@ interface GeoJsonCollection {
 const cityData = shallowRef<GeoJsonCollection | null>(null);
 const villageData = shallowRef<GeoJsonCollection | null>(null);
 const isLoaded = ref(false);
+const optimizedCityNodes = shallowRef<SimpleCityNode[]>([]);
 
 export function useCityData() {
     async function loadLocationData() {
@@ -41,6 +46,10 @@ export function useCityData() {
             if (citiesRes.ok) cityData.value = await citiesRes.json();
             if (villagesRes.ok) villageData.value = await villagesRes.json();
 
+            const cNodes = processCollection(cityData.value);
+
+            optimizedCityNodes.value = [...cNodes!];
+
             isLoaded.value = true;
         } catch (e) {
             console.error("Failed to load map data:", e);
@@ -51,80 +60,11 @@ export function useCityData() {
         routeGameX: number,
         routeGameZ: number
     ): number {
-        let scale = 19;
-
-        if (!cityData.value || !cityData.value.features) return scale;
-
-        for (const feature of cityData.value.features) {
-            const [cityLng, cityLat] = feature.geometry.coordinates;
-
-            const [cityGameX, cityGameZ] = convertGeoToGame(cityLng, cityLat);
-
-            const dx = routeGameX - cityGameX;
-            const dy = routeGameZ - cityGameZ;
-            const distToCityCenter = Math.sqrt(dx * dx + dy * dy);
-
-            let safeRadius = 900;
-
-            if (
-                feature.properties.scaleRank &&
-                feature.properties.scaleRank < 3
-            ) {
-                safeRadius = 500;
-            }
-
-            if (distToCityCenter < safeRadius) {
-                return 3;
-            }
-        }
-
-        return 19;
-    }
-
-    function buildRouteStatsCache(pathCoords: [number, number][]) {
-        const cache = new Float32Array(pathCoords.length * 2);
-
-        let totalGameKm = 0;
-        let totalGameHours = 0;
-
-        cache[0] = 0; // km
-        cache[1] = 0; // hours
-
-        for (let i = 0; i < pathCoords.length - 1; i++) {
-            const point1 = convertGeoToGame(
-                pathCoords[i]![0],
-                pathCoords[i]![1]
-            );
-            const point2 = convertGeoToGame(
-                pathCoords[i + 1]![0],
-                pathCoords[i + 1]![1]
-            );
-
-            const dx = point2[0] - point1[0];
-            const dy = point2[1] - point1[1];
-            const rawSegmentLength = Math.sqrt(dx * dx + dy * dy);
-
-            const midX = (point1[0] + point2[0]) / 2;
-            const midZ = (point1[1] + point2[1]) / 2;
-
-            // Same logic as in calculategameroute but much performant.
-            const multiplier = getScaleForLocation(midX, midZ);
-
-            const segmentKm = (rawSegmentLength * multiplier) / 1000;
-            totalGameKm += segmentKm;
-
-            let segmentSpeed = 70;
-            if (multiplier === 3) segmentSpeed = 35;
-
-            const segmentHours = segmentKm / segmentSpeed;
-            totalGameHours += segmentHours;
-
-            const nextIdx = (i + 1) * 2;
-            cache[nextIdx] = totalGameKm;
-            cache[nextIdx + 1] = totalGameHours;
-        }
-
-        return cache;
+        return getScaleMultiplier(
+            routeGameX,
+            routeGameZ,
+            optimizedCityNodes.value
+        );
     }
 
     function calculateGameRouteDetails(pathCoords: [number, number][]) {
@@ -148,7 +88,11 @@ export function useCityData() {
             const midX = (point1[0] + point2[0]) / 2;
             const midZ = (point1[1] + point2[1]) / 2;
 
-            const multiplier = getScaleForLocation(midX, midZ);
+            const multiplier = getScaleMultiplier(
+                midX,
+                midZ,
+                optimizedCityNodes.value
+            );
 
             const segmentKm = (rawSegmentLength * multiplier) / 1000;
 
@@ -171,6 +115,37 @@ export function useCityData() {
             km: Math.round(totalGameKm),
             time: `${h}h ${m}min`,
         };
+    }
+
+    const processCollection = (collection: GeoJsonCollection | null) => {
+        const nodes: SimpleCityNode[] = [];
+        if (!collection || !collection.features) return;
+
+        for (const feature of collection.features) {
+            const [lng, lat] = feature.geometry.coordinates;
+
+            const [gameX, gameZ] = convertGeoToGame(lng, lat);
+
+            let radius = 900;
+            if (
+                feature.properties.scaleRank &&
+                feature.properties.scaleRank < 3
+            ) {
+                radius = 500;
+            }
+
+            nodes.push({
+                x: gameX,
+                z: gameZ,
+                radius: radius,
+            });
+        }
+
+        return nodes;
+    };
+
+    function getWorkerCityData() {
+        return processCollection(cityData.value);
     }
 
     function getGameLocationName(targetX: number, targetY: number): string {
@@ -238,7 +213,8 @@ export function useCityData() {
     return {
         loadLocationData,
         getGameLocationName,
-        buildRouteStatsCache,
+        getScaleForLocation,
+        getWorkerCityData,
         calculateGameRouteDetails,
     };
 }

@@ -1,10 +1,4 @@
-import {
-    distance,
-    lineSlice,
-    lineString,
-    nearestPointOnLine,
-    point,
-} from "@turf/turf";
+import { distance, lineString, nearestPointOnLine, point } from "@turf/turf";
 import maplibregl from "maplibre-gl";
 import { getAngleDiff, getBearing } from "~/assets/utils/geographicMath";
 import { AppSettings } from "~~/shared/variables/appSettings";
@@ -14,8 +8,7 @@ export const useRouteController = (
     adjacency: Map<number, { to: number; weight: number; r: number }[]>,
     nodeCoords: Map<number, [number, number]>
 ) => {
-    const { mergeClosePoints } = useRouting();
-    const { getGameLocationName, buildRouteStatsCache } = useCityData();
+    const { getGameLocationName, getWorkerCityData } = useCityData();
     const { getClosestNodes } = useGraphSystem();
 
     const currentRoutePath = shallowRef<[number, number][] | null>(null);
@@ -47,9 +40,16 @@ export const useRouteController = (
 
     function initWorkerData(nodesArray: any[], edgesArray: any[]) {
         if (!worker) return;
+
+        const cityPayload = getWorkerCityData();
+
         worker.postMessage({
             type: "INIT_GRAPH",
-            payload: { nodes: nodesArray, edges: edgesArray },
+            payload: {
+                nodes: nodesArray,
+                edges: edgesArray,
+                cities: cityPayload,
+            },
         });
     }
 
@@ -58,7 +58,8 @@ export const useRouteController = (
         possibleEnds: number[],
         heading: number,
         startType: string,
-        targetCoords: [number, number]
+        targetCoords: [number, number],
+        projectedStartCoords: [number, number]
     ): Promise<any> {
         return new Promise((resolve) => {
             if (!worker) {
@@ -83,6 +84,7 @@ export const useRouteController = (
                     heading,
                     startType,
                     targetCoords,
+                    projectedStartCoords,
                 },
             });
         });
@@ -172,7 +174,8 @@ export const useRouteController = (
         startNodeId: number,
         targetCoords: [number, number],
         truckHeading: number,
-        startType: "road" | "yard"
+        startType: "road" | "yard",
+        projectedStartCoords: [number, number]
     ) {
         const SEARCH_RADII = [1, 2, 4, 8, 16, 32, 100, 300];
 
@@ -186,7 +189,8 @@ export const useRouteController = (
                 candidates,
                 truckHeading,
                 startType,
-                targetCoords
+                targetCoords,
+                projectedStartCoords
             );
 
             if (result) {
@@ -197,62 +201,28 @@ export const useRouteController = (
         return null;
     }
 
-    function smoothPath(coords: [number, number][]): [number, number][] {
-        if (coords.length < 3) return coords;
-
-        const output: [number, number][] = [];
-
-        output.push(coords[0]!);
-
-        for (let i = 0; i < coords.length - 1; i++) {
-            const p0 = coords[i]!;
-            const p1 = coords[i + 1]!;
-
-            const q: [number, number] = [
-                0.75 * p0[0] + 0.25 * p1[0],
-                0.75 * p0[1] + 0.25 * p1[1],
-            ];
-
-            const r: [number, number] = [
-                0.25 * p0[0] + 0.75 * p1[0],
-                0.25 * p0[1] + 0.75 * p1[1],
-            ];
-
-            output.push(q);
-            output.push(r);
-        }
-
-        output.push(coords[coords.length - 1]!);
-
-        return output;
-    }
-
     function drawRouteOnMap(coords: [number, number][]) {
         if (!map.value) return;
 
-        let cleanCoords = mergeClosePoints(coords, 600);
+        const rawMap = toRaw(map.value);
 
-        let smoothed = smoothPath(cleanCoords);
-        smoothed = smoothPath(smoothed);
-
-        const line = lineString(smoothed);
-
-        const source = map.value.getSource(
+        const source = rawMap.getSource(
             "debug-route"
         ) as maplibregl.GeoJSONSource;
 
-        if (source) {
-            source.setData({
-                type: "FeatureCollection",
-                features: [
-                    {
-                        type: "Feature",
-                        properties: {},
-                        geometry: line.geometry,
+        source.setData({
+            type: "FeatureCollection",
+            features: [
+                {
+                    type: "Feature",
+                    properties: {},
+                    geometry: {
+                        type: "LineString",
+                        coordinates: toRaw(coords),
                     },
-                ],
-            });
-        }
+                },
+            ],
+        });
     }
 
     function addDestinationMarker(nodeId: number) {
@@ -328,7 +298,6 @@ export const useRouteController = (
                 truckHeading,
                 10
             );
-
             if (!startConfig) {
                 console.warn(
                     "Could not find a valid road matching truck heading."
@@ -337,16 +306,14 @@ export const useRouteController = (
             }
 
             startNodeId.value = startConfig.toId;
-            console.log(clickCoords);
-
-            const endCandidates = getClosestNodes(clickCoords, 10, 0.1);
-            if (endCandidates.length === 0) return;
+            console.log(clickCoords); // Keep for debugging map roads.
 
             const result = await findFlexibleRoute(
                 startNodeId.value!,
                 clickCoords,
                 truckHeading,
-                startConfig.type as "road" | "yard"
+                startConfig.type as "road" | "yard",
+                startConfig.projectedCoords
             );
 
             if (result) {
@@ -356,20 +323,19 @@ export const useRouteController = (
                 }
 
                 endNodeId.value = result.endId;
-                const stitchedPath = [
-                    startConfig.projectedCoords,
-                    ...result.path,
-                ];
-                currentRoutePath.value = stitchedPath;
 
-                const cache = buildRouteStatsCache(stitchedPath);
-                routeStatsCache.value = cache;
+                // Safety, it is now immutable.
+                const frozenRawPath = Object.freeze(result.rawPath);
+                currentRoutePath.value = frozenRawPath as any;
 
-                const lastIdx = (stitchedPath.length - 1) * 2;
+                routeStatsCache.value = result.stats;
+
+                const cache = result.stats;
+                const lastIdx = (result.rawPath.length - 1) * 2;
                 const totalKm = cache[lastIdx]!;
                 const totalHours = cache[lastIdx + 1]!;
 
-                drawRouteOnMap(stitchedPath);
+                drawRouteOnMap(result.displayPath);
                 addDestinationMarker(result.endId);
 
                 routeDistance.value = `${Math.round(totalKm)} km`;
