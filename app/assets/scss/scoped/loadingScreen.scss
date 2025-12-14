@@ -1,0 +1,43 @@
+@use "~/assets/scss/global/variables" as *;
+
+.loading-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+
+    z-index: 9999;
+
+    background-color: #272d39;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: $white-font-text;
+    font-family: "Quicksand", sans-serif;
+}
+
+.progress-text {
+    font-size: 24px;
+    font-weight: bold;
+    color: $secondaryColor;
+    margin-top: 10px;
+    font-family: inherit;
+}
+
+.progress-bar-bg {
+    width: 200px;
+    height: 6px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    margin-bottom: 10px;
+    overflow: hidden;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background-color: $secondaryColor;
+    transition: width 0.2s ease-out;
+}

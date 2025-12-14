@@ -2,8 +2,8 @@
 import { ref, onMounted, shallowRef, Transition } from "vue";
 import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl from "maplibre-gl";
-import { AppSettings } from "~~/shared/variables/appSettings";
-import { darkenColor, lightenColor } from "~/assets/utils/colors";
+import type TruckMarker from "./truckMarker.vue";
+import SpeedLimit from "./speedLimit.vue";
 
 // MAP STATE
 const mapEl = ref<HTMLElement | null>(null);
@@ -14,7 +14,7 @@ const map = shallowRef<maplibregl.Map | null>(null);
 const isSheetExpanded = ref(false);
 
 // TRUCK STATE
-const truckEl = ref<HTMLElement | null>(null);
+const truckMarkerComponent = ref<InstanceType<typeof TruckMarker> | null>(null);
 
 //// COMPOSABLES
 // Telemetry Data
@@ -73,7 +73,10 @@ watch([loading, gameConnected], ([isLoading, isGameConnected]) => {
         }, 100);
 
         if (isGameConnected) {
-            setupTruckMarker(truckEl.value!);
+            if (!truckMarkerComponent.value) return;
+            const truckEl = truckMarkerComponent.value.markerElement!;
+            setupTruckMarker(truckEl);
+
             setTimeout(() => {
                 isCameraLocked.value = true;
             }, 500);
@@ -119,20 +122,24 @@ onMounted(async () => {
         });
 
         startTelemetry(() => {
-            if (!truckCoords.value) return;
-
-            updateTruckMarkerPosition(truckCoords.value, truckHeading.value);
-
-            followTruck(truckCoords.value, truckHeading.value);
-
-            if (endMarker.value) {
-                updateRouteProgress(truckCoords.value);
-            }
+            telemetryClick();
         });
     } catch (e) {
         console.error(e);
     }
 });
+
+function telemetryClick() {
+    if (!truckCoords.value) return;
+
+    updateTruckMarkerPosition(truckCoords.value, truckHeading.value);
+
+    followTruck(truckCoords.value, truckHeading.value);
+
+    if (endMarker.value) {
+        updateRouteProgress(truckCoords.value);
+    }
+}
 
 function onStartNavigation() {
     if (!truckMarker.value) return;
@@ -154,233 +161,46 @@ function onToggleSheet() {
     <div ref="wrapperEl" class="full-page-wrapper">
         <div ref="mapEl" class="map-container"></div>
 
-        <div class="game-information">
-            <div class="truck-info">
-                <div class="truck-speed-div">
-                    <div class="road-perspective"></div>
-                    <p class="truck-speed">{{ truckSpeed }}</p>
-                    <p class="km-h">km/h</p>
-                </div>
-            </div>
-
-            <div v-if="gameConnected" class="gas-sleep-time">
-                <div class="gas-sleep">
-                    <div class="fuel-amount">
-                        <Icon
-                            name="bi:fuel-pump-fill"
-                            :class="{ 'pulse-red': fuel < 100 }"
-                        />
-                        <p>{{ fuel }}<span class="liters">l</span></p>
-                    </div>
-
-                    <div class="sleep-div">
-                        <Icon
-                            name="solar:moon-sleep-bold"
-                            class="sleep-icon"
-                            :class="{ 'pulse-blue': restStopMinutes < 90 }"
-                        />
-                        <p>{{ restStoptime }}</p>
-                    </div>
-                </div>
-
-                <p class="game-time">{{ gameTime }}</p>
-            </div>
-
-            <div v-else class="disconnected-div">
-                <p class="disconnected-message">Game Offline</p>
-                <Icon
-                    name="streamline-ultimate:link-disconnected-bold"
-                    class="disconnected-icon"
-                />
-            </div>
-        </div>
+        <TopBar
+            :fuel="fuel"
+            :game-connected="gameConnected"
+            :game-time="gameTime"
+            :rest-stop-minutes="restStopMinutes"
+            :rest-stop-time="restStoptime"
+            :truck-speed="truckSpeed"
+        />
 
         <Transition name="fade">
-            <div v-if="loading" class="loading-screen">
-                <div class="progress-text">{{ progress }}%</div>
-                <div class="progress-bar-bg">
-                    <div
-                        class="progress-bar-fill"
-                        :style="{ width: progress + '%' }"
-                    ></div>
-                </div>
-                <h2>Loading Route Data...</h2>
-            </div>
+            <LoadingScreen v-if="loading" :progress="progress" />
         </Transition>
 
-        <button class="option-btn center-btn" @click.prevent="lockCamera">
-            <Icon name="fe:target" size="24" class="target-icon" />
-        </button>
+        <HudButton icon-name="fe:target" :lock-camera="lockCamera" />
 
         <Transition name="bottom-circle">
-            <div
-                v-if="speedLimit !== 0 && !endMarker"
-                class="speed-limit-circle speed-limit-circle-bottom"
-            >
-                <Transition name="over-limit">
-                    <div
-                        v-if="truckSpeed > speedLimit + 5"
-                        class="speed-limit-circle-over-limit"
-                    >
-                        <div class="over-limit">{{ truckSpeed }}</div>
-                    </div>
-                </Transition>
-
-                <div class="speed-limit">{{ speedLimit }}</div>
-            </div>
+            <SpeedLimit
+                v-if="!endMarker"
+                :truck-speed="truckSpeed"
+                :speed-limit="speedLimit"
+                variant="bottom"
+            />
         </Transition>
 
         <Transition name="sheet-slide">
-            <div
+            <SheetSlide
                 v-if="endMarker"
-                class="bottom-sheet"
-                :class="{ 'is-expanded': isSheetExpanded }"
-                :style="{
-                    '--theme-color': AppSettings.theme.defaultColor,
-                }"
-            >
-                <div
-                    v-if="speedLimit !== 0"
-                    class="speed-limit-circle speed-limit-circle-sheet"
-                >
-                    <Transition name="over-limit">
-                        <div
-                            v-if="truckSpeed > speedLimit + 5"
-                            class="speed-limit-circle-over-limit"
-                        >
-                            <div class="over-limit">{{ truckSpeed }}</div>
-                        </div>
-                    </Transition>
-                    <div class="speed-limit">
-                        {{ speedLimit }}
-                    </div>
-                </div>
-
-                <div class="sheet-header" @click="onToggleSheet">
-                    <div class="drag-pill"></div>
-                </div>
-
-                <div class="sheet-body">
-                    <div class="top-row">
-                        <div class="trip-info" @click="onToggleSheet">
-                            <h2 class="dest-name">{{ destinationName }}</h2>
-
-                            <div class="mini-stats" v-if="!isSheetExpanded">
-                                <span class="eta">{{ routeEta }}</span>
-                                <span class="dist">({{ routeDistance }})</span>
-                            </div>
-                        </div>
-
-                        <button
-                            class="cancel-btn nav-btn"
-                            @click.stop="clearRouteState"
-                        >
-                            <Icon
-                                name="material-symbols:close-rounded"
-                                size="24"
-                            />
-                        </button>
-                    </div>
-
-                    <div class="expanded-content">
-                        <div class="separator"></div>
-
-                        <div class="full-stats">
-                            <div class="stat-block">
-                                <Icon
-                                    name="tabler:clock-filled"
-                                    size="26"
-                                    class="icon-eta"
-                                />
-                                <div>
-                                    <div class="value">{{ routeEta }}</div>
-                                    <div class="label">Estimated Time</div>
-                                </div>
-                            </div>
-
-                            <div class="stat-block">
-                                <Icon
-                                    name="tabler:ruler-2"
-                                    size="26"
-                                    class="icon-dist"
-                                />
-                                <div>
-                                    <div class="value">{{ routeDistance }}</div>
-                                    <div class="label">Distance</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div
-                            class="action-buttons"
-                            @click.prevent="onStartNavigation"
-                        >
-                            <button class="start-btn nav-btn">
-                                <Icon
-                                    name="tabler:navigation-check"
-                                    size="24"
-                                />
-                                <span>Start Navigation</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                :clear-route-state="clearRouteState"
+                :on-toggle-sheet="onToggleSheet"
+                :on-start-navigation="onStartNavigation"
+                :destination-name="destinationName"
+                :is-sheet-expanded="isSheetExpanded"
+                :route-distance="routeDistance"
+                :route-eta="routeEta"
+                :speed-limit="speedLimit"
+                :truck-speed="truckSpeed"
+            />
         </Transition>
 
-        <div style="display: none">
-            <div ref="truckEl" class="truck-marker">
-                <svg
-                    width="48"
-                    height="48"
-                    viewBox="0 0 100 100"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    style="
-                        display: block;
-                        filter: drop-shadow(0px 6px 8px rgba(0, 0, 0, 0.3));
-                    "
-                >
-                    <defs>
-                        <linearGradient
-                            id="two-tone"
-                            x1="0%"
-                            y1="0%"
-                            x2="100%"
-                            y2="0%"
-                        >
-                            <stop
-                                offset="50%"
-                                :stop-color="
-                                    darkenColor(
-                                        AppSettings.theme.defaultColor,
-                                        0.1
-                                    )
-                                "
-                            />
-                            <stop
-                                offset="50%"
-                                :stop-color="
-                                    lightenColor(
-                                        AppSettings.theme.defaultColor,
-                                        0.23
-                                    )
-                                "
-                            />
-                        </linearGradient>
-                    </defs>
-
-                    <path
-                        d="M50 10 L90 85 L50 70 L10 85 Z"
-                        fill="url(#two-tone)"
-                        stroke="url(#two-tone)"
-                        stroke-width="12"
-                        stroke-linejoin="round"
-                        paint-order="stroke fill"
-                    />
-                </svg>
-            </div>
-        </div>
+        <TruckMarker ref="truckMarkerComponent" />
     </div>
 </template>
 

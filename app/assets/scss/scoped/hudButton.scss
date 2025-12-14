@@ -1,0 +1,35 @@
+@use "~/assets/scss/global/variables" as *;
+
+.option-btn {
+    margin-top: calc($game-info-bar-height + 10px);
+    color: $white-font-text;
+    position: absolute;
+    padding: 3px 3px;
+    display: flex;
+    justify-self: center;
+    align-items: center;
+    cursor: pointer;
+    font-family: inherit;
+
+    background-color: $primaryColor;
+    border: 1px solid $secondaryColor;
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: background-color 0.2s ease;
+
+    @media (hover: hover) {
+        &:hover {
+            background-color: $secondaryColor !important;
+        }
+    }
+
+    &:active {
+        background-color: $secondaryColor !important;
+    }
+}
+
+.center-btn {
+    top: 150px;
+    right: 9px;
+}

@@ -1,0 +1,65 @@
+@use "~/assets/scss/global/variables" as *;
+
+$speed-limit-height: 72px;
+
+.over-limit {
+    align-items: center;
+    justify-self: end;
+    color: $red-color;
+    font-size: 2rem;
+    font-weight: 800;
+}
+
+.speed-limit-circle-sheet {
+    top: calc(-1 * $speed-limit-height - 25px);
+    left: 20px;
+}
+
+.speed-limit-circle-bottom {
+    bottom: 25px;
+    left: 20px;
+}
+
+.speed-limit {
+    color: #272d39;
+    font-weight: 800;
+    letter-spacing: -0.8px;
+    font-size: 3.2rem;
+
+    max-width: 100%;
+    text-align: center;
+    line-height: 1;
+}
+
+.speed-limit-circle {
+    position: absolute;
+
+    border: 5px solid $red-color;
+
+    background-color: $white-font-text;
+    border-radius: 100px;
+    width: $speed-limit-height;
+    height: calc($speed-limit-height - 3px);
+
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.speed-limit-circle-over-limit {
+    position: absolute;
+    top: calc(-1 * ($speed-limit-height - 46px));
+    right: calc(-1 * ($speed-limit-height - 55px));
+
+    border: 3.5px solid #304257;
+    border-radius: 100px;
+
+    width: (calc($speed-limit-height - 28px));
+    height: (calc($speed-limit-height - 28px));
+    background-color: #1d2833;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
