@@ -153,6 +153,11 @@ function onStartNavigation() {
     isSheetExpanded.value = false;
     isSheetHidden.value = true;
 }
+
+function onSheetClosed() {
+    isSheetHidden.value = false;
+    isSheetExpanded.value = false;
+}
 </script>
 
 <template>
@@ -183,7 +188,7 @@ function onStartNavigation() {
             />
         </Transition>
 
-        <Transition name="sheet-slide">
+        <Transition name="sheet-slide" @after-leave="onSheetClosed">
             <SheetSlide
                 v-if="endMarker"
                 :clear-route-state="clearRouteState"

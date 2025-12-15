@@ -15,8 +15,15 @@ body {
     font-family: $primaryFont;
     font-weight: 600;
     background-color: $primaryColor;
-    overflow: hidden;
     -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+.full-page-wrapper {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    overflow: hidden;
 }
 
 input {

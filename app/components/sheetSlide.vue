@@ -61,9 +61,24 @@ function onToggleSheet() {
                         class="chevron-icon"
                         size="18"
                     />
-                    {{ isSheetHidden ? "Show" : "Hide" }}
+                    {{ isSheetHidden ? "" : "Hide" }}
                 </button>
             </div>
+
+            <Transition name="compact-slide">
+                <div
+                    v-if="isSheetHidden"
+                    v-on:click="onToggleSheetHidden"
+                    class="compact-trip-progress"
+                    :style="{ '--theme-color': AppSettings.theme.defaultColor }"
+                >
+                    <Icon name="lets-icons:road-finish-fill" size="22" />
+                    <div class="right">
+                        <span>{{ routeDistance }}, </span>
+                        <span>{{ routeEta }}</span>
+                    </div>
+                </div>
+            </Transition>
 
             <div class="top-row">
                 <div class="trip-info" @click="onToggleSheet">

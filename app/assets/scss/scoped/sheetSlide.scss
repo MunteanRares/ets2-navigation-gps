@@ -1,4 +1,12 @@
 @use "~/assets/scss/global/variables" as *;
+
+@mixin safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: constant(safe-area-inset-bottom);
+}
+
+$compact-bar-height: 35px;
+
 .nav-btn {
     background-color: var(--theme-color);
     display: flex;
@@ -94,7 +102,8 @@
 
         gap: 8px;
         font-size: 1.8rem;
-        transition: opacity 0.3s ease, max-height 0.3s ease;
+        transition: opacity 0.3s cubic-bezier(0.165, 0.84, 0.44, 1),
+            max-height 0.1s ease-in;
 
         .eta {
             color: #2ecc71;
@@ -141,6 +150,44 @@
     display: flex;
     flex-direction: column;
     transition: 0.4s ease;
+
+    &.is-expanded {
+        .expanded-content {
+            max-height: 300px;
+            opacity: 1;
+            margin-top: 10px;
+        }
+
+        .mini-stats {
+            opacity: 0;
+            max-height: 0;
+        }
+
+        .drag-pill {
+            background-color: var(--theme-color);
+        }
+    }
+
+    &.is-hidden {
+        transform: translateY(100%);
+        border-color: transparent;
+        box-shadow: 0 -4px 20px rgba(0, 0, 0, 0);
+
+        .trip-info {
+            opacity: 0;
+        }
+
+        .hide-sheet {
+            top: -46px;
+            right: 6px;
+            z-index: 9;
+        }
+
+        .hide-sheet-btn {
+            height: calc($compact-bar-height - 8px);
+            padding: 6px 6px;
+        }
+    }
 }
 
 .expanded-content {
@@ -150,37 +197,6 @@
     transition: max-height 0.4s ease, opacity 0.3s ease;
 }
 
-.bottom-sheet.is-expanded {
-    .expanded-content {
-        max-height: 300px;
-        opacity: 1;
-        margin-top: 10px;
-    }
-
-    .mini-stats {
-        opacity: 0;
-        max-height: 0;
-    }
-
-    .drag-pill {
-        background-color: var(--theme-color);
-    }
-}
-
-.bottom-sheet.is-hidden {
-    max-height: 0;
-    transform: translateY(100%);
-    border-color: transparent;
-
-    .trip-info {
-        opacity: 0;
-    }
-
-    .hide-sheet {
-        top: -50px;
-    }
-}
-
 .chevron-icon {
     color: $white-font-text;
 }
@@ -188,7 +204,7 @@
 .hide-sheet {
     position: absolute;
     top: -40px;
-    left: 15px;
+    right: 15px;
     transition: 0.4s ease;
 
     .hide-sheet-btn {
@@ -196,6 +212,43 @@
         gap: 2px;
         padding: 4px 10px;
     }
+}
+
+// COMPACT INFO TRANSITION
+.compact-slide-enter-active {
+    transition: 0.4s cubic-bezier(0.165, 0.84, 0.44, 1) 0.2s;
+}
+
+.compact-slide-leave-active {
+    transition: 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.compact-slide-enter-from,
+.compact-slide-leave-to {
+    opacity: 0;
+    transform: translateX(30%);
+}
+
+.compact-trip-progress {
+    position: absolute;
+    top: -50px;
+    right: -2px;
+    padding: 4px 48px 4px 12px;
+
+    display: flex;
+    gap: 1.4rem;
+    height: $compact-bar-height;
+
+    font-size: 1.8rem;
+    color: $white-font-text;
+
+    border: 1.5px solid var(--theme-color);
+    border-right: none;
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+
+    background-color: $primaryColor;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .separator {
@@ -217,6 +270,7 @@
         .icon-eta {
             color: #2ecc71;
         }
+
         .icon-dist {
             color: var(--theme-color);
         }
@@ -226,6 +280,7 @@
             font-weight: 700;
             color: $white-font-text;
         }
+
         .label {
             font-size: 1.3rem;
             color: rgba(255, 255, 255, 0.5);
