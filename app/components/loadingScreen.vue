@@ -15,6 +15,4 @@ defineProps<{ progress: number }>();
     </div>
 </template>
 
-<style lang="scss" scoped>
-@use "~/assets/scss/scoped/loadingScreen.scss";
-</style>
+<style lang="scss" scoped src="~/assets/scss/scoped/loadingScreen.scss"></style>

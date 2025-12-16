@@ -164,6 +164,10 @@ function onSheetClosed() {
     <div ref="wrapperEl" class="full-page-wrapper">
         <div ref="mapEl" class="map-container"></div>
 
+        <Transition name="fade">
+            <LoadingScreen v-if="loading" :progress="progress" />
+        </Transition>
+
         <TopBar
             :fuel="fuel"
             :game-connected="gameConnected"
@@ -173,9 +177,7 @@ function onSheetClosed() {
             :truck-speed="truckSpeed"
         />
 
-        <Transition name="fade">
-            <LoadingScreen v-if="loading" :progress="progress" />
-        </Transition>
+        <Notification />
 
         <HudButton icon-name="fe:target" :lock-camera="lockCamera" />
 
@@ -209,6 +211,4 @@ function onSheetClosed() {
     </div>
 </template>
 
-<style scoped lang="scss">
-@use "/assets/scss/scoped/map.scss";
-</style>
+<style scoped lang="scss" src="~/assets/scss/scoped/map.scss"></style>

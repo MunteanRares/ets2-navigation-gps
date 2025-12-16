@@ -8,6 +8,4 @@ defineProps<{ lockCamera: () => void; iconName: string }>();
     </button>
 </template>
 
-<style lang="scss" scoped>
-@use "~/assets/scss/scoped/hudButton.scss";
-</style>
+<style lang="scss" scoped src="~/assets/scss/scoped/hudButton.scss"></style>

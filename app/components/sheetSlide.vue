@@ -132,6 +132,4 @@ function onToggleSheet() {
     </div>
 </template>
 
-<style lang="scss" scoped>
-@use "~/assets/scss/scoped/sheetSlide.scss";
-</style>
+<style lang="scss" scoped src="~/assets/scss/scoped/sheetSlide.scss"></style>
