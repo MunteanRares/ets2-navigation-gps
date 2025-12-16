@@ -222,7 +222,7 @@ export const calculateRoute = (
                     const segDist = fastDistKm(gLng, gLat, tLng, tLat);
                     traveledDist += segDist;
 
-                    if (traveledDist > 0.3) {
+                    if (traveledDist > 1) {
                         const headingOld = getHeading(gLng, gLat, tLng, tLat);
 
                         const headingNew = getHeading(cLng, cLat, nLng, nLat);
