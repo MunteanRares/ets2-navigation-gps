@@ -61,7 +61,40 @@ export async function initializeMap(
         maxPitch: 45,
         localIdeographFontFamily: "Quicksand",
         attributionControl: false,
+        bounds: [
+            [-22, 25],
+            [50, 70],
+        ],
     });
+
+    //// =================> LATER ATS UPDATE <=================
+    // const map = {
+    //     ets: {
+    //         container,
+    //         style,
+    //         center: [10, 50],
+    //         zoom: 6,
+    //         minZoom: 5,
+    //         maxZoom: 11.5,
+    //         maxPitch: 45,
+    //         localIdeographFontFamily: "Quicksand",
+    //         attributionControl: false,
+    //         bounds: [
+    //             [-22, 25],
+    //             [50, 70],
+    //         ],
+    //     },
+
+    //     ats: {
+    //         center: [-98, 39],
+    //         bounds: [
+    //             [-130, 23], // SW
+    //             [-60, 55], // NE
+    //         ],
+    //         minZoom: 4,
+    //         maxZoom: 10.5,
+    //     },
+    // };
 
     map.on("load", async () => {
         ////
