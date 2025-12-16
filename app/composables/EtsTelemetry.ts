@@ -6,25 +6,80 @@ import { convertTelemtryTime } from "~/assets/utils/helpers";
 
 const TELEMETRY_API = "/api/ets2";
 
+export interface TelemetryUpdate {
+    truck: TruckState;
+    game: GameState;
+    general: GeneralInfo;
+    job: JobInfo;
+}
+
+interface GameState {
+    gameTime: string;
+    gameConnected: boolean;
+    hasInGameMarker: boolean;
+}
+
+interface TruckState {
+    truckCoords: [number, number] | null;
+    truckHeading: number;
+    truckSpeed: number;
+}
+
+interface GeneralInfo {
+    fuel: number;
+    speedLimit: number;
+    restStoptime: string;
+    restStopMinutes: number;
+}
+
+interface JobInfo {
+    hasActiveJob: boolean;
+    income: number;
+    deadlineTime: Date;
+    remainingTime: Date;
+    sourceCity: string;
+    sourceCompany: string;
+    destinationCity: string;
+    destinationCompany: string;
+}
+
 export function useEtsTelemetry() {
     const isTelemetryConnected = ref(false);
     const isRunning = ref(false);
 
     // TRUCK STATE
-    const truckCoords = ref<[number, number] | null>(null);
-    const truckHeading = ref<number>(0);
-    const truckSpeed = ref<number>(0);
+    const truckState = reactive<TruckState>({
+        truckCoords: [0, 0],
+        truckHeading: 0,
+        truckSpeed: 0,
+    });
 
     // GAME STATE
-    const gameTime = ref<string>("");
-    const gameConnected = ref<boolean>(false);
-    const restStoptime = ref<string>("");
-    const restStopMinutes = ref<number>(0);
+    const gameState = reactive<GameState>({
+        gameTime: "",
+        gameConnected: false,
+        hasInGameMarker: false,
+    });
 
-    // NAVIGATION STATE
-    const speedLimit = ref<number>(0);
-    const fuel = ref<number>(0);
-    const hasInGameMarker = ref(false);
+    // GAME INFO
+    const generalInfo = reactive<GeneralInfo>({
+        fuel: 0,
+        speedLimit: 0,
+        restStoptime: "",
+        restStopMinutes: 0,
+    });
+
+    // JOB INFO
+    const jobInfo = reactive<JobInfo>({
+        hasActiveJob: false,
+        income: 0,
+        deadlineTime: new Date(),
+        remainingTime: new Date(),
+        sourceCity: "0",
+        sourceCompany: "0",
+        destinationCity: "0",
+        destinationCompany: "0",
+    });
 
     let lastPosition: [number, number] | null = null;
     let headingOffset = 0;
@@ -32,13 +87,39 @@ export function useEtsTelemetry() {
     let fetchTimer: ReturnType<typeof setTimeout> | null = null;
     let abortController: AbortController | null = null;
 
-    function startTelemetry(
-        onUpdate?: (
-            coords: [number, number],
-            heading: number,
-            time: string
-        ) => void
+    function getCorrectHeading(
+        rawGameHeading: number,
+        truckSpeed: number,
+        currentCoords: [number, number]
     ) {
+        const rawDegrees = -rawGameHeading * 360;
+
+        if (lastPosition && truckSpeed > 10) {
+            const dist = Math.sqrt(
+                Math.pow(currentCoords[0] - lastPosition[0], 2) +
+                    Math.pow(currentCoords[1] - lastPosition[1], 2)
+            );
+
+            if (dist > 0.00005) {
+                const trueBearing = getBearing(lastPosition, currentCoords);
+
+                let diff = trueBearing - rawDegrees;
+                while (diff < -180) diff += 360;
+                while (diff > 180) diff -= 360;
+
+                if (Math.abs(diff) < 90) {
+                    headingOffset += (diff - headingOffset) * 0.1;
+                }
+            }
+        }
+
+        let finalHeading = rawDegrees + headingOffset;
+        finalHeading = ((finalHeading % 360) + 360) % 360;
+
+        return finalHeading;
+    }
+
+    function startTelemetry(onUpdate?: (data: TelemetryUpdate) => void) {
         if (isRunning.value) return;
         isRunning.value = true;
 
@@ -92,130 +173,129 @@ export function useEtsTelemetry() {
     }
 
     function resetDataOnDisconnected(
-        onUpdate?: (
-            coords: [number, number],
-            heading: number,
-            time: string,
-            gameConnected: boolean,
-            speedLimit: number,
-            speedKmh: number,
-            gas: string,
-            restStoptime: string,
-            inGameMarker: boolean
-        ) => void
+        onUpdate?: (data: TelemetryUpdate) => void
     ) {
-        const wasConnected = gameConnected.value;
+        const wasConnected = gameState.gameConnected;
 
         isTelemetryConnected.value = false;
-        truckSpeed.value = 0;
-        gameConnected.value = false;
-        speedLimit.value = 0;
-        fuel.value = 0;
-        restStoptime.value = "0";
-        hasInGameMarker.value = false;
+
+        // GAME STATE
+        Object.assign(gameState, {
+            gameConnected: false,
+            hasInGameMarker: false,
+            gameTime: "",
+        });
+
+        // TRUCK STATE
+        Object.assign(truckState, {
+            truckCoords: [0, 0],
+            truckHeading: 0,
+            truckSpeed: 0,
+        });
+
+        // GENERAL INFO
+        Object.assign(generalInfo, {
+            fuel: 0,
+            speedLimit: 0,
+            restStopMinutes: 0,
+            restStoptime: "0",
+        });
+
+        // JOB INFO
+        Object.assign(jobInfo, {
+            hasActiveJob: false,
+        });
 
         if (onUpdate && wasConnected) {
-            onUpdate([0, 0], 0, "", false, 0, 0, "0", "0", false);
+            onUpdate({
+                truck: { ...truckState },
+                game: { ...gameState },
+                general: { ...generalInfo },
+                job: { ...jobInfo },
+            });
         }
     }
 
     function processData(
         data: TelemetryData,
-        onUpdate?: (
-            coords: [number, number],
-            heading: number,
-            time: string,
-            gameConnected: boolean,
-            speedLimit: number,
-            speedKmh: number,
-            gas: string,
-            restStoptime: string,
-            inGameMarker: boolean
-        ) => void
+        onUpdate?: (data: TelemetryUpdate) => void
     ) {
         // Truck Placement
-        const { x, z } = data.truck.placement;
-        const rawGameHeading = data.truck.placement.heading;
-        const currentCoords = convertGameToGeo(x, z);
 
-        // Truck speed
-        const speedKmh = Math.max(0, Math.floor(data.truck.speed));
-
-        // Game Connected
-        const connected = data.game.connected;
-
-        // Has a destionation in Game (Excludin Jobs)
-        const inGameMarker =
+        // GAME STATE
+        const gameConnected = data.game.connected;
+        const hasInGameMarker =
             data.navigation.estimatedDistance > 100 && data.job.income === 0;
 
-        // Game Time
         const { formatted: formattedTime, raw } = convertTelemtryTime(
             data.game.time
         );
         const day = raw.toUTCString().slice(0, 3);
-        const time = `${day} ${formattedTime}`;
+        const gameTime = `${day} ${formattedTime}`;
 
-        // Speed Limit + Fuel + Next Rest Stop Time
-        const sLimit = data.navigation.speedLimit;
-        const gas = data.truck.fuel.toFixed(1);
-        const { formatted: restTime, raw: restRaw } = convertTelemtryTime(
+        // TRUCK STATE
+        const { x, z } = data.truck.placement;
+        const rawGameHeading = data.truck.placement.heading;
+        const truckCoords = convertGameToGeo(x, z);
+        const truckSpeed = Math.max(0, Math.floor(data.truck.speed));
+        const truckHeading = getCorrectHeading(
+            rawGameHeading,
+            truckSpeed,
+            truckCoords
+        );
+
+        // GENERAL INFO
+        const fuel = parseInt(data.truck.fuel.toFixed(1));
+        const speedLimit = data.navigation.speedLimit;
+        const { formatted: restStoptime, raw: restRaw } = convertTelemtryTime(
             data.game.nextRestStopTime
         );
-        const minutes = restRaw.getUTCHours() * 60 + restRaw.getUTCMinutes();
+        const restStopMinutes =
+            restRaw.getUTCHours() * 60 + restRaw.getUTCMinutes();
 
-        // Calculate heading correctly.
-        const rawDegrees = -rawGameHeading * 360;
-        if (lastPosition && speedKmh > 10) {
-            const dist = Math.sqrt(
-                Math.pow(currentCoords[0] - lastPosition[0], 2) +
-                    Math.pow(currentCoords[1] - lastPosition[1], 2)
-            );
+        // JOB INFO
+        const hasActiveJob = data.job.income > 0;
+        const destinationCity = data.job.destinationCity;
+        const destinationCompany = data.job.destinationCompany;
 
-            if (dist > 0.00005) {
-                const trueBearing = getBearing(lastPosition, currentCoords);
+        // GAME STATE
+        Object.assign(gameState, {
+            gameTime: gameTime,
+            gameConnected: gameConnected,
+            hasInGameMarker: hasInGameMarker,
+        });
 
-                let diff = trueBearing - rawDegrees;
-                while (diff < -180) diff += 360;
-                while (diff > 180) diff -= 360;
+        // TRUCK STATE
+        Object.assign(truckState, {
+            truckCoords: truckCoords,
+            truckHeading: truckHeading,
+            truckSpeed: truckSpeed,
+        });
 
-                if (Math.abs(diff) < 90) {
-                    headingOffset += (diff - headingOffset) * 0.1;
-                }
-            }
-        }
-        let finalHeading = rawDegrees + headingOffset;
-        finalHeading = ((finalHeading % 360) + 360) % 360;
+        // GENERAL INFO
+        Object.assign(generalInfo, {
+            restStoptime: restStoptime,
+            restStopMinutes: restStopMinutes,
+            speedLimit: speedLimit,
+            fuel: fuel,
+        });
 
-        // Truck state.
-        truckCoords.value = currentCoords;
-        truckHeading.value = finalHeading;
-        truckSpeed.value = speedKmh;
-        fuel.value = parseInt(gas);
+        // JOB INFO
+        Object.assign(jobInfo, {
+            hasActiveJob: hasActiveJob,
+            destinationCity: destinationCity,
+            destinationCompany: destinationCompany,
+        });
 
-        // Game state.
-        gameTime.value = time;
-        gameConnected.value = connected;
-        restStoptime.value = restTime;
-        restStopMinutes.value = minutes;
-
-        // Navigation state.
-        speedLimit.value = sLimit;
-        hasInGameMarker.value = inGameMarker;
-
-        lastPosition = currentCoords;
+        lastPosition = truckCoords;
 
         if (onUpdate) {
-            onUpdate(
-                currentCoords,
-                finalHeading,
-                time,
-                connected,
-                sLimit,
-                speedKmh,
-                gas,
-                restTime,
-                inGameMarker
-            );
+            onUpdate({
+                truck: { ...truckState },
+                game: { ...gameState },
+                general: { ...generalInfo },
+                job: { ...jobInfo },
+            });
         }
     }
 
@@ -224,16 +304,10 @@ export function useEtsTelemetry() {
     });
 
     return {
-        fuel,
-        gameConnected,
-        truckCoords,
-        truckHeading,
-        truckSpeed,
-        speedLimit,
-        restStoptime,
-        gameTime,
-        hasInGameMarker,
-        restStopMinutes,
+        ...toRefs(generalInfo),
+        ...toRefs(truckState),
+        ...toRefs(gameState),
+        ...toRefs(jobInfo),
         startTelemetry,
         stopTelemetry,
     };
