@@ -201,7 +201,6 @@ export function useEtsTelemetry() {
         // Navigation state.
         speedLimit.value = sLimit;
         hasInGameMarker.value = inGameMarker;
-        console.log(hasInGameMarker);
 
         lastPosition = currentCoords;
 

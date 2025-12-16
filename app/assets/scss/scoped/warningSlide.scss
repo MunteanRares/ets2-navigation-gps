@@ -1,0 +1,68 @@
+.compact-trip-progress {
+    position: absolute;
+    bottom: 30px;
+    right: -2px;
+    padding: 4px 14px 4px 6px;
+
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+    justify-content: space-between;
+
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: $primaryColor;
+
+    border: 1.5px solid $primaryColor;
+    border-right: none;
+    border-top-left-radius: 8px;
+    border-bottom-left-radius: 8px;
+
+    background-color: #f59e0b;
+    z-index: 999;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+
+    .toggle-icon {
+        transition: transform 0.3s ease;
+    }
+
+    .text-content {
+        max-width: 0;
+        opacity: 0;
+        overflow: hidden;
+        transition: 0.6s cubic-bezier(0.165, 0.84, 0.44, 1);
+
+        .text-nowrap {
+            white-space: nowrap;
+        }
+    }
+
+    &.expanded {
+        padding-right: 20px;
+
+        .text-content {
+            max-width: 300px;
+            opacity: 1;
+        }
+    }
+}
+
+.warning-message {
+    display: flex;
+    gap: 0.8rem;
+    align-items: center;
+}
+
+.compact-slide-enter-active {
+    transition: 0.4s cubic-bezier(0.165, 0.84, 0.44, 1) 0.2s;
+}
+
+.compact-slide-leave-active {
+    transition: 0.2s cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+.compact-slide-enter-from,
+.compact-slide-leave-to {
+    opacity: 0;
+    transform: translateX(30%);
+}

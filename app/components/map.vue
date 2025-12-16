@@ -209,6 +209,11 @@ function onSheetClosed() {
             :speed-limit="speedLimit"
         />
 
+        <WarningSlide
+            :has-in-game-marker="hasInGameMarker"
+            :has-marker="endMarker ? true : false"
+        />
+
         <Transition name="sheet-slide" @after-leave="onSheetClosed">
             <SheetSlide
                 v-if="endMarker"

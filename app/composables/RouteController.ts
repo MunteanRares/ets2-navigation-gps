@@ -359,11 +359,6 @@ export const useRouteController = (
             console.log(`Route calculation Failed: ${e}`);
         } finally {
             isCalculating.value = false;
-
-            //
-            // setTimeout(() => {
-            //     routeFound.value = null;
-            // }, 2000);
         }
     }
 
