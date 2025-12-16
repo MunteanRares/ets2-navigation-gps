@@ -30,6 +30,7 @@ const {
     fuel,
     restStoptime,
     restStopMinutes,
+    hasInGameMarker,
 } = useEtsTelemetry();
 
 // Map Areas Data
