@@ -9,6 +9,7 @@ const props = defineProps<{
     destinationName: string;
     routeEta: string;
     routeDistance: string;
+    hasActiveJob: boolean;
     clearRouteState: () => void;
     onStartNavigation: () => void;
 }>();
@@ -85,6 +86,7 @@ function onToggleSheet() {
                 </div>
 
                 <button
+                    v-if="!hasActiveJob"
                     class="cancel-btn nav-btn"
                     @click.stop="clearRouteState"
                 >

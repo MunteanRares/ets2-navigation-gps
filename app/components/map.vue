@@ -17,6 +17,9 @@ const isSheetHidden = ref(false);
 // TRUCK STATE
 const truckMarkerComponent = ref<InstanceType<typeof TruckMarker> | null>(null);
 
+// JOB STATE
+const currentJobKey = ref<string>("");
+
 //// COMPOSABLES
 // Telemetry Data
 const {
@@ -31,10 +34,13 @@ const {
     restStoptime,
     restStopMinutes,
     hasInGameMarker,
+    hasActiveJob,
+    destinationCity,
+    destinationCompany,
 } = useEtsTelemetry();
 
 // Map Areas Data
-const { loadLocationData } = useCityData();
+const { loadLocationData, findDestinationCoords } = useCityData();
 
 // Graph manipulation
 const { loading, progress, adjacency, nodeCoords, initializeGraphData } =
@@ -66,8 +72,57 @@ const {
     endMarker,
     isCalculating: isCalculatingRoute,
     initWorkerData,
+    isRouteActive,
     routeFound,
 } = useRouteController(map, adjacency, nodeCoords);
+
+// We check if it has active job, if it has one, plot a route
+watch(
+    [hasActiveJob, destinationCity, destinationCompany, gameConnected, loading],
+    async ([hasJob, city, company, isConnected, isLoading]) => {
+        if (isLoading) return;
+
+        if (!isConnected) {
+            currentJobKey.value = "";
+            return;
+        }
+
+        if (
+            !truckCoords.value ||
+            (truckCoords.value[0] === 0 && truckCoords.value[1] === 0)
+        ) {
+            return;
+        }
+
+        const newJobKey = hasJob ? `${city}|${company}` : "";
+
+        if (uiTimer) clearTimeout(uiTimer);
+
+        uiTimer = setTimeout(async () => {
+            if (hasJob && newJobKey !== currentJobKey.value) {
+                if (!truckCoords.value) return;
+
+                const destCoords = findDestinationCoords(city, company);
+
+                if (destCoords) {
+                    currentJobKey.value = newJobKey;
+
+                    await handleRouteClick(
+                        destCoords,
+                        truckCoords.value,
+                        truckHeading.value,
+                        false
+                    );
+                }
+            }
+        }, 500);
+
+        if (!hasJob && currentJobKey.value !== "") {
+            clearRouteState();
+            currentJobKey.value = "";
+        }
+    }
+);
 
 // We set the routeFound back to null with a delay if its true / false.
 let uiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -81,6 +136,7 @@ watch(routeFound, (newVal) => {
     }
 });
 
+// When loaded, checks gameConnected -> show map
 watch([loading, gameConnected], ([isLoading, isGameConnected]) => {
     if (!isLoading) {
         setTimeout(() => {
@@ -124,6 +180,7 @@ onMounted(async () => {
         });
 
         map.value.on("click", async (e) => {
+            if (hasActiveJob.value) return;
             if (!truckMarker.value) return;
 
             await handleRouteClick(
@@ -132,7 +189,8 @@ onMounted(async () => {
                     truckMarker.value.getLngLat().lng,
                     truckMarker.value.getLngLat().lat,
                 ],
-                truckHeading.value
+                truckHeading.value,
+                true
             );
         });
 
@@ -216,8 +274,9 @@ function onSheetClosed() {
 
         <Transition name="sheet-slide" @after-leave="onSheetClosed">
             <SheetSlide
-                v-if="endMarker"
+                v-if="isRouteActive"
                 :clear-route-state="clearRouteState"
+                :has-active-job="hasActiveJob"
                 :on-start-navigation="onStartNavigation"
                 :destination-name="destinationName"
                 v-model:is-sheet-expanded="isSheetExpanded"

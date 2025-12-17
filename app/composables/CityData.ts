@@ -8,6 +8,8 @@ import {
 // --- Types ---
 interface GeoJsonProperties {
     name: string;
+    poiName: string;
+    poiType: string;
     countryToken?: string;
     scaleRank?: number;
     state?: string;
@@ -30,6 +32,8 @@ interface GeoJsonCollection {
 
 const cityData = shallowRef<GeoJsonCollection | null>(null);
 const villageData = shallowRef<GeoJsonCollection | null>(null);
+const companiesData = shallowRef<GeoJsonCollection | null>(null);
+
 const isLoaded = ref(false);
 const optimizedCityNodes = shallowRef<SimpleCityNode[]>([]);
 
@@ -38,13 +42,16 @@ export function useCityData() {
         if (isLoaded.value) return;
 
         try {
-            const [citiesRes, villagesRes] = await Promise.all([
+            const [citiesRes, villagesRes, companiesRes] = await Promise.all([
                 fetch("/map-data/ets2-cities.geojson"),
                 fetch("/map-data/ets2-villages.geojson"),
+                fetch("/map-data/ets2-companies.geojson"),
             ]);
 
             if (citiesRes.ok) cityData.value = await citiesRes.json();
             if (villagesRes.ok) villageData.value = await villagesRes.json();
+            if (companiesRes.ok)
+                companiesData.value = await companiesRes.json();
 
             const cNodes = processCollection(cityData.value);
 
@@ -65,6 +72,82 @@ export function useCityData() {
             routeGameZ,
             optimizedCityNodes.value
         );
+    }
+
+    function findDestinationCoords(
+        targetCityName: string,
+        targetCompanyName: string
+    ): [number, number] | null {
+        if (!isLoaded.value || !companiesData.value) return null;
+
+        const cityCoords = getCityGeoCoordinates(targetCityName);
+        if (!cityCoords) {
+            console.log(`City not found: ${targetCityName}`);
+            return null;
+        }
+
+        const safeCompanyName = targetCompanyName.toLowerCase().trim();
+
+        const companyCandidates = companiesData.value.features.filter((f) => {
+            const p = f.properties;
+
+            return (
+                p.poiType === "company" &&
+                p.poiName &&
+                p.poiName.toLowerCase().trim() === safeCompanyName
+            );
+        });
+
+        if (companyCandidates.length === 0) {
+            console.warn(`Company not found in data ${targetCompanyName}`);
+
+            return [cityCoords[0], cityCoords[1]];
+        }
+
+        let bestCandidate: GeoJsonFeature | null = null;
+        let minDistance = Infinity;
+
+        const [cityLng, cityLat] = cityCoords;
+
+        for (const candidate of companyCandidates) {
+            const [companyLng, companyLat] = candidate.geometry.coordinates;
+
+            const differenceX = companyLng - cityLng;
+            const differenceY = companyLat - cityLat;
+            const distance =
+                differenceX * differenceX + differenceY * differenceY;
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                bestCandidate = candidate;
+            }
+        }
+
+        if (bestCandidate) {
+            const [finalLng, finalLat] = bestCandidate.geometry.coordinates;
+
+            return [finalLng, finalLat];
+        }
+
+        return null;
+    }
+
+    function getCityGeoCoordinates(name: string): [number, number] | null {
+        const searchName = name.toLowerCase().trim();
+
+        const findIn = (col: GeoJsonCollection | null) => {
+            if (!col || !col.features) return null;
+            return col.features.find(
+                (f) =>
+                    f.properties.name &&
+                    f.properties.name.toLowerCase() === searchName
+            );
+        };
+
+        const city = findIn(cityData.value);
+        if (city) return city.geometry.coordinates;
+
+        return null;
     }
 
     function calculateGameRouteDetails(pathCoords: [number, number][]) {
@@ -216,5 +299,6 @@ export function useCityData() {
         getScaleForLocation,
         getWorkerCityData,
         calculateGameRouteDetails,
+        findDestinationCoords,
     };
 }

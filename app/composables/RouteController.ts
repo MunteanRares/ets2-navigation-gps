@@ -17,7 +17,10 @@ export const useRouteController = (
     const destinationName = ref<string>("");
     const routeDistance = ref<string>("");
     const routeEta = ref<string>("");
+
     const endMarker = ref<maplibregl.Marker | null>(null);
+    const isRouteActive = ref(false);
+
     const startNodeId = ref<number | null>(null);
     const endNodeId = ref<number | null>(null);
     const lastMathPos = ref<[number, number] | null>(null);
@@ -308,7 +311,8 @@ export const useRouteController = (
     async function handleRouteClick(
         clickCoords: [number, number],
         truckCoords: [number, number],
-        truckHeading: number
+        truckHeading: number,
+        createEndMarker: boolean
     ) {
         if (adjacency.size === 0 || isCalculating.value) return;
 
@@ -321,6 +325,7 @@ export const useRouteController = (
                 truckHeading,
                 10
             );
+
             if (!startConfig) {
                 console.warn(
                     "Could not find a valid road matching truck heading."
@@ -345,6 +350,8 @@ export const useRouteController = (
                     endMarker.value = null;
                 }
 
+                isRouteActive.value = true;
+
                 endNodeId.value = result.endId;
 
                 // Safety, it is now immutable.
@@ -359,7 +366,7 @@ export const useRouteController = (
                 const totalHours = cache[lastIdx + 1]!;
 
                 drawRouteOnMap(result.displayPath);
-                addDestinationMarker(result.endId);
+                if (createEndMarker) addDestinationMarker(result.endId);
 
                 routeDistance.value = `${Math.round(totalKm)} km`;
                 const h = Math.floor(totalHours);
@@ -377,6 +384,7 @@ export const useRouteController = (
             }
         } catch (e) {
             console.log(`Route calculation Failed: ${e}`);
+            isRouteActive.value = false;
         } finally {
             isCalculating.value = false;
         }
@@ -462,6 +470,8 @@ export const useRouteController = (
             endMarker.value = null;
         }
 
+        isRouteActive.value = false;
+
         endNodeId.value = null;
         currentRoutePath.value = null;
     }
@@ -474,6 +484,7 @@ export const useRouteController = (
         isCalculating,
         routeFound,
         currentRoutePath,
+        isRouteActive,
         initWorkerData,
         setupRouteLayer,
         handleRouteClick,
