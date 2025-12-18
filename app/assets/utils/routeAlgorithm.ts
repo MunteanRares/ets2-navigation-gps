@@ -182,7 +182,6 @@ export const calculateRoute = (
                 } else {
                     const dir = getBearing([cLng, cLat], [nLng, nLat]);
                     const diff = getAngleDiff(startHeading, dir);
-                    console.log(diff);
                     if (diff > 75) stepCost += 10_000_000;
                     else if (diff > 45) stepCost += 1000;
                 }
