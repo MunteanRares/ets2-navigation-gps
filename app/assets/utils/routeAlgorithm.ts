@@ -201,7 +201,7 @@ export const calculateRoute = (
                     if (angle < -100) stepCost += 100_000;
                 }
 
-                if (absAngle > 98) {
+                if (absAngle > 100) {
                     stepCost += Infinity;
                 } else if (angle < -45) stepCost += 2000;
                 else if (angle > 45) stepCost += 500;
@@ -223,14 +223,32 @@ export const calculateRoute = (
                     traveledDist += segDist;
 
                     if (traveledDist > 0.8) {
+                        // 1. Calculate the direction we were going 0.8km ago
                         const headingOld = getHeading(gLng, gLat, tLng, tLat);
 
+                        // 2. Calculate the direction we are going right now
                         const headingNew = getHeading(cLng, cLat, nLng, nLat);
 
+                        // 3. Calculate the straight-line distance (displacement)
+                        const distNowToPast = fastDistKm(
+                            cLng,
+                            cLat,
+                            gLng,
+                            gLat
+                        );
+
+                        // 4. Calculate the Ratio (Path Distance vs. Straight Distance)
+                        const ratio = traveledDist / distNowToPast;
+
+                        // 5. Compare the angles
                         const diff = getRadianAngleDiff(headingOld, headingNew);
 
-                        if (diff > 2.8) {
+                        if (diff > 3.0 && ratio > 1.0) {
+                            // High ratio + opposite heading = Highway U-turn (BAN IT)
                             stepCost += Infinity;
+                        } else if (diff > 3.0) {
+                            // Low ratio + opposite heading = Yard loop/Service road (PENALIZE IT)
+                            stepCost += 5000;
                         }
                         break;
                     }
