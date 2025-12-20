@@ -185,7 +185,9 @@ watch([loading, gameConnected], ([isLoading, isGameConnected]) => {
 onMounted(async () => {
     await loadLocationData();
     if (!mapEl.value) return;
-    (window as any).electronAPI.setWindowSize(900, 600, true, true);
+    if (isElectron.value) {
+        (window as any).electronAPI.setWindowSize(900, 600, true, true);
+    }
 
     try {
         map.value = await initializeMap(mapEl.value);

@@ -16,6 +16,7 @@
         "@capacitor/cli": "^8.0.0",
         "@capacitor/core": "^8.0.0",
         "@capacitor/ios": "^8.0.0",
+        "@capacitor/preferences": "^7.0.3",
         "@nuxt/icon": "^2.1.0",
         "@turf/turf": "^7.3.1",
         "maplibre-gl": "^5.14.0",

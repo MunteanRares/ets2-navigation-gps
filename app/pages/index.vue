@@ -4,10 +4,12 @@ const { isElectron, isMobile, isWeb } = usePlatform();
 const currentView = ref<string>("");
 
 onMounted(() => {
-    if (isWeb.value || isMobile.value) {
+    if (isWeb.value) {
         currentView.value = "map";
-    } else if (isElectron) {
-        currentView.value = "home";
+    } else if (isElectron.value) {
+        currentView.value = "desktopHome";
+    } else if (isMobile.value) {
+        currentView.value = "mobileHome";
     }
 });
 
@@ -21,6 +23,10 @@ const goHome = () => {
 </script>
 
 <template>
-    <DesktopIndex v-if="currentView === 'home'" :launch-map="launchMap" />
+    <DesktopIndex
+        v-if="currentView === 'desktopHome'"
+        :launch-map="launchMap"
+    />
+    <MobileIndex v-if="currentView === 'mobileHome'" />
     <LazyMap v-if="currentView === 'map'" :goHome="goHome" />
 </template>
