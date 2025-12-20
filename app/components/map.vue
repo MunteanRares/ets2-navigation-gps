@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import maplibregl from "maplibre-gl";
 import type TruckMarker from "./truckMarker.vue";
 import SpeedLimit from "./speedLimit.vue";
+import { usePlatform } from "~/composables/Platform";
 
 // MAP STATE
 const mapEl = ref<HTMLElement | null>(null);
@@ -20,7 +21,12 @@ const truckMarkerComponent = ref<InstanceType<typeof TruckMarker> | null>(null);
 // JOB STATE
 const currentJobKey = ref<string>("");
 
-//// COMPOSABLES
+//
+//
+//// ======> COMPOSABLES <======
+
+//
+//
 // Telemetry Data
 const {
     startTelemetry,
@@ -39,13 +45,25 @@ const {
     destinationCompany,
 } = useEtsTelemetry();
 
+//
+//
 // Map Areas Data
 const { loadLocationData, findDestinationCoords } = useCityData();
 
+//
+//
+// Check Platform
+const { isElectron, isMobile, isWeb } = usePlatform();
+
+//
+//
 // Graph manipulation
 const { loading, progress, adjacency, nodeCoords, initializeGraphData } =
     useGraphSystem();
 
+//
+//
+// TruckMarker
 const {
     truckMarker,
     setupTruckMarker,
@@ -53,6 +71,9 @@ const {
     removeMarker,
 } = useTruckMarker(map);
 
+//
+//
+// Maplibre Camera
 const {
     isCameraLocked,
     initCameraListeners,
@@ -61,6 +82,9 @@ const {
     lockCamera,
 } = useMapCamera(map);
 
+//
+//
+// Route Controller
 const {
     setupRouteLayer,
     handleRouteClick,
@@ -74,6 +98,8 @@ const {
     isRouteActive,
     routeFound,
 } = useRouteController(map, adjacency, nodeCoords);
+
+let uiTimer: ReturnType<typeof setTimeout> | null = null;
 
 // We check if it has active job, if it has one, plot a route
 watch(
@@ -124,7 +150,6 @@ watch(
 );
 
 // We set the routeFound back to null with a delay if its true / false.
-let uiTimer: ReturnType<typeof setTimeout> | null = null;
 watch(routeFound, (newVal) => {
     if (newVal !== null) {
         if (uiTimer) clearTimeout(uiTimer);
