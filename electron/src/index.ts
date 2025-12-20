@@ -4,9 +4,10 @@ import {
     setupElectronDeepLinking,
 } from "@capacitor-community/electron";
 import type { MenuItemConstructorOptions } from "electron";
-import { app, ipcMain, MenuItem } from "electron";
+import { app, ipcMain, MenuItem, shell } from "electron";
 import electronIsDev from "electron-is-dev";
 import unhandled from "electron-unhandled";
+import { screen } from "electron";
 import { autoUpdater } from "electron-updater";
 import os from "os";
 
@@ -16,6 +17,10 @@ import {
     setupReloadWatcher,
 } from "./setup";
 
+//
+//
+//
+//// ======> CUSTOM FUNCTIONS <======
 ipcMain.handle("get-local-ip", () => {
     const interfaces = os.networkInterfaces();
     for (const name of Object.keys(interfaces)) {
@@ -27,6 +32,32 @@ ipcMain.handle("get-local-ip", () => {
     }
     return "127.0.0.1";
 });
+
+ipcMain.on("open-external", (_event, url) => {
+    shell.openExternal(url);
+});
+
+ipcMain.on(
+    "set-window-size",
+    (_event, { width, height, resizable, maximize }) => {
+        const win = myCapacitorApp.getMainWindow();
+
+        if (!maximize) {
+            win.unmaximize();
+            win.setResizable(true);
+            win.setSize(width, height);
+            win.setResizable(resizable);
+            win.center();
+        } else {
+            win.setResizable(true);
+            win.maximize();
+        }
+    }
+);
+//// ======> CUSTOM FUNCTIONS <======
+//
+//
+//
 
 // Graceful handling of unhandled errors.
 unhandled();
@@ -49,7 +80,7 @@ const capacitorFileConfig: CapacitorElectronConfig =
 const myCapacitorApp = new ElectronCapacitorApp(
     capacitorFileConfig,
     trayMenuTemplate,
-    appMenuBarMenuTemplate
+    []
 );
 
 // If deeplinking is enabled then we will set it up here.

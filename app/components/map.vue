@@ -6,6 +6,8 @@ import type TruckMarker from "./truckMarker.vue";
 import SpeedLimit from "./speedLimit.vue";
 import { usePlatform } from "~/composables/Platform";
 
+defineProps<{ goHome: () => void }>();
+
 // MAP STATE
 const mapEl = ref<HTMLElement | null>(null);
 const map = shallowRef<maplibregl.Map | null>(null);
@@ -183,6 +185,7 @@ watch([loading, gameConnected], ([isLoading, isGameConnected]) => {
 onMounted(async () => {
     await loadLocationData();
     if (!mapEl.value) return;
+    (window as any).electronAPI.setWindowSize(900, 600, true, true);
 
     try {
         map.value = await initializeMap(mapEl.value);
@@ -296,6 +299,10 @@ const onToggleFullscreen = async () => {
             :rest-stop-time="restStoptime"
             :truck-speed="truckSpeed"
         />
+
+        <div class="back-home" v-if="isElectron">
+            <HudButton icon-name="i-tabler:arrow-back" :onClick="goHome" />
+        </div>
 
         <NotificationRoute
             :is-route-found="routeFound"

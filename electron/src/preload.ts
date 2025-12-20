@@ -10,4 +10,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.on("server-ip", (_event, value) => callback(value)),
 
     getLocalIP: () => ipcRenderer.invoke("get-local-ip"),
+
+    openExternal: (url: string) => ipcRenderer.send("open-external", url),
+
+    setWindowSize: (
+        width: number,
+        height: number,
+        resizable: boolean,
+        maximize: boolean
+    ) =>
+        ipcRenderer.send("set-window-size", {
+            width,
+            height,
+            resizable,
+            maximize,
+        }),
 });

@@ -3,9 +3,16 @@ import { AppSettings } from "~~/shared/variables/appSettings";
 
 const { fetchIp, localIP } = useNetwork();
 
+defineProps<{ launchMap: () => void }>();
+
 onMounted(async () => {
     await fetchIp();
+    (window as any).electronAPI.setWindowSize(900, 600, false, false);
 });
+
+const openLink = async (url: string) => {
+    (window as any).electronAPI.openExternal(url);
+};
 </script>
 
 <template>
@@ -45,7 +52,11 @@ onMounted(async () => {
                 <span>
                     GitHub Link:
                     <a
-                        href="https://github.com/Rares-Muntean/ets2-navigation-gps"
+                        @click.prevent="
+                            openLink(
+                                'https://github.com/Rares-Muntean/ets2-navigation-gps'
+                            )
+                        "
                         >TruckNav</a
                     >
                 </span>
@@ -53,7 +64,7 @@ onMounted(async () => {
         </div>
 
         <div class="bottom">
-            <button class="btn">
+            <button @click.prevent="launchMap" class="btn">
                 <span>Desktop GPS</span>
                 <Icon name="material-symbols:map-rounded" size="20" />
             </button>

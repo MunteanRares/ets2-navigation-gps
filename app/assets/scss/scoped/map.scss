@@ -13,6 +13,12 @@
     overflow: hidden;
 }
 
+.back-home {
+    position: absolute;
+    top: calc($game-info-bar-height + 1.8rem);
+    left: 10px;
+}
+
 .warnings {
     position: absolute;
     bottom: 30px;
@@ -27,7 +33,7 @@
 .hud-buttons {
     position: absolute;
     top: calc($game-info-bar-height + 1.8rem);
-    right: 9px;
+    right: 10px;
 
     display: flex;
     flex-direction: column;
