@@ -113,7 +113,6 @@ watch(
             currentJobKey.value = "";
             return;
         }
-        console.log(hasJob, isConnected, city, company, isLoading);
 
         if (
             !truckCoords.value ||
