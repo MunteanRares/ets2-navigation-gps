@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import type TruckMarker from "./truckMarker.vue";
 import SpeedLimit from "./speedLimit.vue";
 import { usePlatform } from "~/composables/Platform";
+import eruda from "eruda";
 
 defineProps<{ goHome: () => void }>();
 
@@ -112,6 +113,7 @@ watch(
             currentJobKey.value = "";
             return;
         }
+        console.log(hasJob, isConnected, city, company, isLoading);
 
         if (
             !truckCoords.value ||
@@ -183,6 +185,10 @@ watch([loading, gameConnected], ([isLoading, isGameConnected]) => {
 });
 
 onMounted(async () => {
+    if (isMobile.value) {
+        eruda.init();
+    }
+
     await loadLocationData();
     if (!mapEl.value) return;
     if (isElectron.value) {
@@ -286,86 +292,92 @@ const onToggleFullscreen = async () => {
 </script>
 
 <template>
-    <div ref="wrapperEl" class="full-page-wrapper">
+    <div
+        ref="wrapperEl"
+        class="full-page-wrapper"
+        :class="{ 'platform-mobile': isMobile }"
+    >
         <div ref="mapEl" class="map-container"></div>
 
-        <Transition name="fade">
-            <LoadingScreen v-if="loading" :progress="progress" />
-        </Transition>
+        <div class="ui-safe-container">
+            <Transition name="fade">
+                <LoadingScreen v-if="loading" :progress="progress" />
+            </Transition>
 
-        <TopBar
-            :fuel="fuel"
-            :game-connected="gameConnected"
-            :game-time="gameTime"
-            :rest-stop-minutes="restStopMinutes"
-            :rest-stop-time="restStoptime"
-            :truck-speed="truckSpeed"
-        />
-
-        <div class="back-home" v-if="isElectron">
-            <HudButton icon-name="i-tabler:arrow-back" :onClick="goHome" />
-        </div>
-
-        <NotificationRoute
-            :is-route-found="routeFound"
-            :is-calculating-route="isCalculatingRoute"
-        />
-
-        <div class="hud-buttons">
-            <HudButton
-                v-if="isWeb"
-                icon-name="gridicons:fullscreen"
-                :onClick="onToggleFullscreen"
-            />
-            <HudButton icon-name="ix:navigation" :onClick="onResetNorth" />
-            <HudButton icon-name="fe:target" :onClick="lockCamera" />
-        </div>
-
-        <SpeedLimit
-            :class="{
-                'pos-default': !isRouteActive || isSheetHidden,
-                'pos-expanded': isSheetExpanded && isRouteActive,
-                'pos-collapsed':
-                    !isSheetExpanded && isRouteActive && !isSheetHidden,
-            }"
-            :truck-speed="truckSpeed"
-            :speed-limit="speedLimit"
-        />
-
-        <div class="warnings">
-            <WarningSlide
-                :show-if="hasInGameMarker && isRouteActive"
-                :reset-on="isRouteActive"
-                text="External Route Detected: Set Waypoint"
-            />
-
-            <WarningSlide
-                :show-if="!gameConnected"
-                :reset-on="gameConnected"
-                text="Game Offline"
-            />
-        </div>
-
-        <Transition name="sheet-slide" @after-leave="onSheetClosed">
-            <SheetSlide
-                v-if="isRouteActive"
-                :clear-route-state="clearRouteState"
-                :has-active-job="hasActiveJob"
-                :on-start-navigation="onStartNavigation"
-                :destination-name="destinationName"
-                v-model:is-sheet-expanded="isSheetExpanded"
-                v-model:is-sheet-hidden="isSheetHidden"
-                :route-distance="routeDistance"
-                :route-eta="routeEta"
-                :speed-limit="speedLimit"
+            <TopBar
+                :fuel="fuel"
+                :game-connected="gameConnected"
+                :game-time="gameTime"
+                :rest-stop-minutes="restStopMinutes"
+                :rest-stop-time="restStoptime"
                 :truck-speed="truckSpeed"
             />
-        </Transition>
 
-        <TruckMarker
-            :is-camera-locked="isCameraLocked"
-            ref="truckMarkerComponent"
-        />
+            <div class="back-home" v-if="isElectron || isMobile">
+                <HudButton icon-name="i-tabler:arrow-back" :onClick="goHome" />
+            </div>
+
+            <NotificationRoute
+                :is-route-found="routeFound"
+                :is-calculating-route="isCalculatingRoute"
+            />
+
+            <div class="hud-buttons">
+                <HudButton
+                    v-if="isWeb"
+                    icon-name="gridicons:fullscreen"
+                    :onClick="onToggleFullscreen"
+                />
+                <HudButton icon-name="ix:navigation" :onClick="onResetNorth" />
+                <HudButton icon-name="fe:target" :onClick="lockCamera" />
+            </div>
+
+            <SpeedLimit
+                :class="{
+                    'pos-default': !isRouteActive || isSheetHidden,
+                    'pos-expanded': isSheetExpanded && isRouteActive,
+                    'pos-collapsed':
+                        !isSheetExpanded && isRouteActive && !isSheetHidden,
+                }"
+                :truck-speed="truckSpeed"
+                :speed-limit="speedLimit"
+            />
+
+            <div class="warnings">
+                <WarningSlide
+                    :show-if="hasInGameMarker && isRouteActive"
+                    :reset-on="isRouteActive"
+                    text="External Route Detected: Set Waypoint"
+                />
+
+                <WarningSlide
+                    :show-if="!gameConnected"
+                    :reset-on="gameConnected"
+                    text="Game Offline"
+                />
+            </div>
+
+            <Transition name="sheet-slide" @after-leave="onSheetClosed">
+                <SheetSlide
+                    v-if="isRouteActive"
+                    :clear-route-state="clearRouteState"
+                    :has-active-job="hasActiveJob"
+                    :on-start-navigation="onStartNavigation"
+                    :destination-name="destinationName"
+                    v-model:is-sheet-expanded="isSheetExpanded"
+                    v-model:is-sheet-hidden="isSheetHidden"
+                    :route-distance="routeDistance"
+                    :route-eta="routeEta"
+                    :speed-limit="speedLimit"
+                    :truck-speed="truckSpeed"
+                />
+            </Transition>
+
+            <TruckMarker
+                :is-camera-locked="isCameraLocked"
+                ref="truckMarkerComponent"
+            />
+        </div>
     </div>
 </template>
 

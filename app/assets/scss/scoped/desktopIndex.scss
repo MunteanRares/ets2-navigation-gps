@@ -74,20 +74,61 @@
 
 .bottom {
     display: flex;
-    justify-content: end;
+    justify-content: space-between;
 
     margin: 3.2rem;
+}
+
+.bottom-info {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.8rem;
+    gap: 2.4rem;
+    padding: 0px 14px;
+}
+
+.status-div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.safe-to-close {
+    font-size: 1.6rem;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+
+    padding: 8px 0px 8px 6px;
+
+    border-left: $green-color 3px solid;
+    border-radius: 3px;
+
+    .icon {
+        align-self: flex-start;
+        color: $green-color;
+    }
+}
+
+.status {
+    display: flex;
+    font-size: 1.6rem;
+
+    .connected {
+        color: $green-color;
+    }
+
+    .disconnected {
+        color: $red-color;
+    }
 }
 
 .github-link {
     display: flex;
     gap: 0.6rem;
-    align-items: center;
 
     font-size: 1.3rem;
     font-weight: 600;
-
-    margin-top: 0.8rem;
 
     a {
         cursor: pointer;

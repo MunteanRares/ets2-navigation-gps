@@ -1,10 +1,12 @@
 .section-mobile-menu {
     height: 100vh;
+    height: calc(100vh - env(safe-area-inset-top));
+
     color: $white-font-text;
 
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    justify-content: flex-start;
 }
 
 .title {
@@ -26,6 +28,7 @@
 }
 
 .content {
+    flex: 1;
     width: 80%;
     align-self: center;
     display: flex;
@@ -34,6 +37,8 @@
     gap: 1.8rem;
 
     font-size: 1.6rem;
+
+    justify-content: center;
 }
 
 .form-details {

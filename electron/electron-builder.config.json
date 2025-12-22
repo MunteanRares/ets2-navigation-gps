@@ -3,7 +3,13 @@
     "directories": {
         "buildResources": "resources"
     },
-    "files": ["assets/**/*", "build/**/*", "capacitor.config.*", "app/**/*"],
+    "files": [
+        "assets/**/*",
+        "build/**/*",
+        "capacitor.config.*",
+        "app/**/*",
+        "!public/debug-roadnetwork/europe-route-graph.geojson"
+    ],
     "publish": null,
     "extraResources": [
         {
@@ -19,7 +25,7 @@
     },
     "win": {
         "target": "nsis",
-        "icon": "assets/appIcon.ico"
+        "icon": "assets/TruckNavIconOutline.ico"
     },
     "mac": {
         "category": "your.app.category.type",

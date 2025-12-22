@@ -4,10 +4,9 @@ import {
     setupElectronDeepLinking,
 } from "@capacitor-community/electron";
 import type { MenuItemConstructorOptions } from "electron";
-import { app, ipcMain, MenuItem, shell } from "electron";
+import { app, dialog, ipcMain, MenuItem, shell } from "electron";
 import electronIsDev from "electron-is-dev";
 import unhandled from "electron-unhandled";
-import { autoUpdater } from "electron-updater";
 import os from "os";
 
 import {
@@ -16,77 +15,59 @@ import {
     setupReloadWatcher,
 } from "./setup";
 import path from "path";
-import { execSync, spawn } from "child_process";
+import { exec, execSync, spawn } from "child_process";
 import { existsSync, writeFileSync, writeSync } from "fs";
 
 //
 //
 //
 //// ======> CUSTOM FUNCTIONS <======
-
-let telemetryProcess = null;
-
-function startTelemetryServer() {
+async function startTelemetryServer() {
     const exeName = "Ets2Telemetry.exe";
     const serverPath = app.isPackaged
-        ? path.join(
-              process.resourcesPath,
-              "telemetry-server",
-              "Ets2Telemetry.exe"
-          )
-        : path.join(
-              __dirname,
-              "..",
-              "..",
-              "bin",
-              "telemetry-server",
-              "Ets2Telemetry.exe"
-          );
+        ? path.join(process.resourcesPath, "telemetry-server", exeName)
+        : path.join(app.getAppPath(), "bin", "telemetry-server", exeName);
 
-    console.log("Checking path:", serverPath);
-
-    try {
-        const runningProcesses = execSync(
-            `tasklist /FI "IMAGENAME eq ${exeName}" /NH`
-        ).toString();
-
-        if (runningProcesses.includes(exeName)) {
-            console.log(
-                "🚀 Telemetry Server is already running. Skipping startup."
-            );
-            return;
-        }
-    } catch (err) {
-        console.error("Process check failed, attempting to start anyway.");
+    if (!existsSync(serverPath)) {
+        dialog.showErrorBox(
+            "DEBUG: Path Error",
+            `File NOT found at:\n${serverPath}`
+        );
+        return;
     }
 
+    try {
+        const running = execSync(
+            `tasklist /FI "IMAGENAME eq ${exeName}" /NH`
+        ).toString();
+        if (running.toLowerCase().includes(exeName.toLowerCase())) return;
+    } catch (e) {}
+
+    const serverDir = path.dirname(serverPath);
     const flagPath = path.join(app.getPath("userData"), ".first-run-completed");
     const isFirstRun = !existsSync(flagPath);
 
-    if (isFirstRun) {
-        telemetryProcess = spawn(serverPath, [], {
-            cwd: path.dirname(serverPath),
-            shell: true,
-        });
+    const style = isFirstRun ? "Normal" : "Minimized";
 
-        writeFileSync(flagPath, "done");
-    } else {
-        const psCommand = `Start-Process -FilePath "${serverPath}" -WorkingDirectory "${path.dirname(
-            serverPath
-        )}" -WindowStyle Minimized`;
+    const psCommand = `Start-Process -FilePath '${serverPath}' -WorkingDirectory '${serverDir}' -WindowStyle ${style}`;
 
-        telemetryProcess = spawn("powershell.exe", ["-Command", psCommand], {
-            shell: true,
-        });
-    }
+    const logPath = path.join(os.homedir(), "Desktop", "truck-nav-debug.txt");
+    writeFileSync(
+        logPath,
+        `Attempting to launch:\n${psCommand}\n\nPackaged: ${app.isPackaged}`
+    );
 
-    telemetryProcess.stdout.on("data", (data) => {
-        console.log(`Server: ${data}`);
+    const child = spawn(
+        "powershell.exe",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCommand],
+        { shell: true }
+    );
+
+    child.stderr.on("data", (data) => {
+        dialog.showErrorBox("POWERSHELL ERROR", data.toString());
     });
 
-    telemetryProcess.on("error", (err) => {
-        console.error("Failed to start telemetry server:", err);
-    });
+    if (isFirstRun) writeFileSync(flagPath, "done");
 }
 
 ipcMain.handle("get-local-ip", () => {
@@ -99,6 +80,16 @@ ipcMain.handle("get-local-ip", () => {
         }
     }
     return "127.0.0.1";
+});
+
+ipcMain.handle("fetch-telemetry", async (_event, ip) => {
+    try {
+        const response = await fetch(`http://${ip}:25555/api/ets2/telemetry`);
+        if (!response.ok) return null;
+        return await response.json();
+    } catch {
+        return null;
+    }
 });
 
 ipcMain.on("open-external", (_event, url) => {
@@ -122,6 +113,24 @@ ipcMain.on(
         }
     }
 );
+
+ipcMain.handle("check-server-status", () => {
+    const exeName = "Ets2Telemetry.exe";
+
+    try {
+        const runningProcesses = execSync(
+            `tasklist /FI "IMAGENAME eq ${exeName}" /NH`
+        ).toString();
+
+        return runningProcesses.includes(exeName);
+    } catch (err) {
+        return false;
+    }
+});
+
+ipcMain.on("manual-start-server", () => {
+    startTelemetryServer();
+});
 //// ======> CUSTOM FUNCTIONS <======
 //
 //
@@ -177,7 +186,7 @@ if (electronIsDev) {
     // Initialize our app, build windows, and load content.
     await myCapacitorApp.init();
     // Check for updates if we are in a packaged app.
-    autoUpdater.checkForUpdatesAndNotify();
+    // autoUpdater.checkForUpdatesAndNotify();
 })();
 
 // Handle when all of our windows are close (platforms have their own expectations).

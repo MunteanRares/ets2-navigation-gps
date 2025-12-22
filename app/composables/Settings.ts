@@ -14,6 +14,8 @@ export const useSettings = () => {
         return value;
     };
 
+    loadIP();
+
     const clearIP = async () => {
         await Preferences.remove({ key: "pc_ip" });
         savedIP.value = null;

@@ -1,7 +1,7 @@
 {
     "name": "truck-nav",
-    "version": "1.0.0",
-    "description": "Real-time GPS navigation route advisor for ETS2. Browser-based second monitor map with live tracking and routing.",
+    "version": "0.2.0",
+    "description": "Real-time GPS navigation route advisor for ETS2. Second monitor map with live tracking and routing.",
     "author": {
         "name": "RaresMuntean",
         "email": "rares_famuntean@yahoo.com"

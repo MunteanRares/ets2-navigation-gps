@@ -5,6 +5,9 @@ import { getBearing } from "~/assets/utils/geographicMath";
 import { convertTelemtryTime } from "~/assets/utils/helpers";
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
+const { isElectron, isMobile, isWeb } = usePlatform();
+const { savedIP } = useSettings();
+
 export interface TelemetryUpdate {
     truck: TruckState;
     game: GameState;
@@ -127,25 +130,32 @@ export function useEtsTelemetry() {
             const startTime = performance.now();
 
             try {
-                if (Capacitor.isNativePlatform()) {
-                    const response = await CapacitorHttp.get({
-                        url: "http://192.168.1.226:25555/api/ets2/telemetry",
-                        connectTimeout: 1000,
-                    });
+                if (isMobile.value) {
+                    try {
+                        const response = await CapacitorHttp.get({
+                            url: `http://${savedIP.value}:25555/api/ets2/telemetry`,
+                            connectTimeout: 1000,
+                        });
 
-                    if (response.status === 200) {
-                        const telemetryData = response.data;
+                        if (response.status === 200) {
+                            const telemetryData = response.data;
 
-                        if (telemetryData && telemetryData.game?.connected) {
-                            isTelemetryConnected.value = true;
-                            processData(telemetryData, onUpdate);
+                            if (
+                                telemetryData &&
+                                telemetryData.game?.connected
+                            ) {
+                                isTelemetryConnected.value = true;
+                                processData(telemetryData, onUpdate);
+                            } else {
+                                resetDataOnDisconnected(onUpdate);
+                            }
                         } else {
-                            resetDataOnDisconnected(onUpdate);
+                            isTelemetryConnected.value = false;
                         }
-                    } else {
-                        isTelemetryConnected.value = false;
+                    } catch (err) {
+                        console.log(err);
                     }
-                } else {
+                } else if (isWeb.value) {
                     if (abortController) abortController.abort();
                     abortController = new AbortController();
                     const timeoutId = setTimeout(
@@ -173,8 +183,20 @@ export function useEtsTelemetry() {
                             resetDataOnDisconnected(onUpdate);
                         }
                     }
+                } else if (isElectron.value) {
+                    const telemetryData = await (
+                        window as any
+                    ).electronAPI.fetchTelemetry("127.0.0.1");
+
+                    if (telemetryData && telemetryData.game?.connected) {
+                        isTelemetryConnected.value = true;
+                        processData(telemetryData, onUpdate);
+                    } else {
+                        resetDataOnDisconnected(onUpdate);
+                    }
                 }
             } catch (err) {
+                console.log(err);
                 if (err instanceof Error && err.name !== "AbortError") {
                     isTelemetryConnected.value = false;
                 }

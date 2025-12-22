@@ -115,13 +115,17 @@ export class ElectronCapacitorApp {
             join(
                 app.getAppPath(),
                 "assets",
-                process.platform === "win32" ? "appIcon.ico" : "appIcon.png"
+                process.platform === "win32"
+                    ? "TruckNavIconOutline.ico"
+                    : "TruckNavIconOutline.png"
             )
         );
+
         this.mainWindowState = windowStateKeeper({
             defaultWidth: 1000,
             defaultHeight: 800,
         });
+
         // Setup preload script path and construct our main window.
         const preloadPath = join(
             app.getAppPath(),
@@ -129,6 +133,7 @@ export class ElectronCapacitorApp {
             "src",
             "preload.js"
         );
+
         this.MainWindow = new BrowserWindow({
             icon,
             show: false,

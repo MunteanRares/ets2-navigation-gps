@@ -25,4 +25,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
             resizable,
             maximize,
         }),
+
+    checkServerStatus: () => ipcRenderer.invoke("check-server-status"),
+    manualStartServer: () => ipcRenderer.send("manual-start-server"),
+    fetchTelemetry: (ip: string) => ipcRenderer.invoke("fetch-telemetry", ip),
 });

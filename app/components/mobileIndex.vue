@@ -1,12 +1,21 @@
 <script lang="ts" setup>
+import { CapacitorHttp } from "@capacitor/core";
 import { AppSettings } from "~~/shared/variables/appSettings";
 
 const { saveIP, loadIP } = useSettings();
 
 const ipInput = ref("");
 const isConnecting = ref(false);
+const connectionError = ref("Disconnected");
+const isConnected = ref(false);
 
 const emit = defineEmits(["connected"]);
+
+watch(isConnected, (connected) => {
+    if (connected) {
+        emit("connected");
+    }
+});
 
 onMounted(async () => {
     const existing = await loadIP();
@@ -14,16 +23,45 @@ onMounted(async () => {
 });
 
 const handleConnect = async () => {
-    if (!ipInput.value) return "Please input a value.";
+    connectionError.value = "Disconnected";
+
+    if (!ipInput.value) {
+        connectionError.value = "Please input a value.";
+        return;
+    }
 
     isConnecting.value = true;
 
-    await saveIP(ipInput.value);
+    const url = `http://${ipInput.value}:25555/api/ets2/telemetry`;
 
-    setTimeout(() => {
+    try {
+        const options = {
+            url: url,
+            connectTimeout: 2000,
+            readTimeout: 2000,
+        };
+
+        const response = await CapacitorHttp.get(options);
+
+        if (response.status === 200 && response.data) {
+            await saveIP(ipInput.value);
+
+            isConnected.value = true;
+
+            setTimeout(() => {
+                isConnecting.value = false;
+                emit("connected");
+            }, 500);
+        } else {
+            throw new Error("Server reached but returned invalid data");
+        }
+    } catch (error) {
+        isConnected.value = false;
+        console.error("Connection failed:", error);
+        connectionError.value =
+            "Could not connect to TruckNav. Is the server running and on the same Wi-Fi?";
         isConnecting.value = false;
-        emit("connected");
-    }, 500);
+    }
 };
 </script>
 
@@ -55,8 +93,10 @@ const handleConnect = async () => {
                     />
                 </form>
                 <p class="status">
-                    Current Status: &nbsp;
-                    <span class="connected">Connected</span>
+                    <span v-if="!connectionError">Current Status: &nbsp;</span>
+                    <span :class="isConnected ? 'connected' : 'disconnected'">{{
+                        isConnected ? "Connected" : connectionError
+                    }}</span>
                 </p>
             </div>
 
