@@ -33,6 +33,23 @@ While the core navigation works, the project is far from perfect. Creating the r
 >
 > Please note that performance optimization is still a work in progress. Depending on your device (especially older tablets or phones), the map rendering might be slow or laggy. I am working on improving this!
 
+
+## Installation via .exe File
+
+1. Download the latest setup file from the
+  [Releases](https://github.com/Rares-Muntean/ets2-navigation-gps/releases) page.
+
+2. Run the downloaded setup file and complete the installation.
+
+3. Launch Truck Nav on your PC.
+
+4. Install the .apk file on your tablet or phone.
+
+5. Open the mobile app and enter the IP address displayed in the PC application.
+
+## Instalation via nodejs
+
+
 ## Prerequisites
 
 Before installing, ensure you have the following software installed on your computer:
@@ -43,15 +60,14 @@ Before installing, ensure you have the following software installed on your comp
 - Download Git: [https://git-scm.com/downloads](https://git-scm.com/downloads)
   
 ## Installation
-
 ### 1. Get the Code
 You can either clone the repository using Git (recommended for easy updates) or download the ZIP file.
 
 **Option A: Git Clone (Recommended)**
 Open your terminal or command prompt and run:
 ```bash
-git clone https://github.com/YOUR_USERNAME/euro-truck-nav.git
-cd euro-truck-nav
+git clone https://github.com/Rares-Muntean/ets2-navigation-gps.git
+cd ts2-navigation-gps
 ```
 **Option B: Download ZIP**
 1. Click the Code button at the top of this page and select `Download ZIP`.
@@ -96,9 +112,8 @@ Follow the instructions from the opened .exe to install the telemetry plugin DLL
 Once the server is running, you can access the dashboard from any device on your local network.
 - On your PC (Same machine): http://localhost:3000
   
-- On your Phone/Tablet (Second Monitor):
-  
-Find your PC's local IP address (e.g., 192.168.1.15) and visit: http://192.168.1.XX:3000
+- On your Phone/Tablet:
+  Download the .apk app then type ip that show in the program.
 
 ##  How it Works
 
@@ -127,7 +142,7 @@ If you test the application and encounter broken intersections, missing road con
 ### Where to Send Reports
 Send your findings to:
 
-* byatisglaaki@gmail.com
+* byatisglaaki+navigationg@gmail.com
 
 Your reports help refine the routing graph and improve navigation accuracy.
 
